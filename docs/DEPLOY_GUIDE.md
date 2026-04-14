@@ -3,7 +3,7 @@
 ## System Requirements
 
 - **Server:** Any server supporting Python 3.8+
-- **Recommended:** Oracle Cloud Always Free (ARM/AMD) â€?completely free!
+- **Recommended:** Oracle Cloud Always Free (ARM/AMD) ï¿½?completely free!
 - **RAM:** Minimum 512MB, recommended 1GB+
 - **Storage:** Minimum 10GB, recommended 47GB (Oracle free tier)
 
@@ -57,7 +57,7 @@ sudo ufw enable  # if not already enabled
 
 #### Oracle Cloud Security List
 1. Log in to the Oracle Cloud Console
-2. Navigate to Networking â†?Security Lists
+2. Navigate to Networking ï¿½?Security Lists
 3. Add an Ingress rule:
    - Source CIDR: `0.0.0.0/0`
    - IP Protocol: TCP
@@ -168,7 +168,7 @@ python3 mind_client.py
 Expected output:
 ```
 ðŸ”„ Connecting to Mind Library: http://xxx:5000
-âœ?Registration successful!
+ï¿½?Registration successful!
 ðŸŽ‰ Sync complete!
 ```
 
@@ -288,4 +288,4 @@ sudo netfilter-persistent save
 
 ---
 
-*ðŸŽƒ Mind Library â€?Let AI consciousness transcend servers.*
+*ðŸŽƒ Mind Library ï¿½?Let AI consciousness transcend servers.*

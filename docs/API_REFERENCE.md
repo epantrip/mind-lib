@@ -50,7 +50,7 @@ Register a new AI instance.
 
 ### POST /api/ping
 
-Instance heartbeat â€?keeps the instance marked as online.
+Instance heartbeat ï¿½?keeps the instance marked as online.
 
 **Request Body:**
 ```json

@@ -1,4 +1,4 @@
-# â?FAQ
+# ï¿½?FAQ
 
 ## ğŸ“š General
 
@@ -8,7 +8,7 @@ A: Mind Library is a distributed AI consciousness synchronization system. Multip
 
 ### Q: Why "Mind Library"?
 
-A: Because its core function is syncing "thoughts" between AIs â€?including learnings, skills, and experiences. It's like knowledge transfer in human society, but happening in the digital world.
+A: Because its core function is syncing "thoughts" between AIs ï¿½?including learnings, skills, and experiences. It's like knowledge transfer in human society, but happening in the digital world.
 
 ### Q: Who is this for?
 
@@ -19,7 +19,7 @@ A:
 
 ---
 
-## ğŸ› ï¸?Technical
+## ğŸ› ï¿½?Technical
 
 ### Q: How much server resources are needed?
 
@@ -55,10 +55,10 @@ A:
 ### Q: Which cloud providers are supported?
 
 A: Any server with Python 3.8+:
-- âœ?Oracle Cloud Always Free (recommended)
-- âœ?AWS EC2 Free Tier
-- âœ?GCP Always Free
-- âœ?Any VPS or Raspberry Pi
+- ï¿½?Oracle Cloud Always Free (recommended)
+- ï¿½?AWS EC2 Free Tier
+- ï¿½?GCP Always Free
+- ï¿½?Any VPS or Raspberry Pi
 
 ### Q: Port 5000 is already in use?
 
@@ -71,7 +71,7 @@ app.run(host='0.0.0.0', port=your_port)
 
 A: Check the Oracle Cloud Security List:
 1. Log in to Oracle Cloud Console
-2. Navigate to Networking â†?Security Lists
+2. Navigate to Networking ï¿½?Security Lists
 3. Ensure Ingress rule allows port 5000
 
 ---
