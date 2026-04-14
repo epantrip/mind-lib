@@ -1,0 +1,4 @@
+# Mind Library Server
+flask>=2.0.0
+requests>=2.25.0
+werkzeug>=2.0.0
