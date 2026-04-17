@@ -15,7 +15,7 @@ class TestServer:
     """服务器端测试"""
     
     def test_health(self):
-        """测试健康检�?""
+        """测试健康检查"""
         resp = requests.get(f"{SERVER_URL}/api/health")
         assert resp.status_code == 200
         data = resp.json()
@@ -35,7 +35,7 @@ class TestServer:
         resp = requests.post(f"{SERVER_URL}/api/register", json={
             "instance_id": TEST_INSTANCE,
             "instance_name": "测试实例",
-            "description": "自动化测�?
+            "description": "自动化测试"
         })
         assert resp.status_code == 200
         data = resp.json()
@@ -71,11 +71,11 @@ class TestServer:
         assert isinstance(data["thoughts"], list)
     
     def test_upload_skill(self):
-        """测试上传技�?""
+        """测试上传技能"""
         resp = requests.post(f"{SERVER_URL}/api/upload/skill", json={
             "instance_id": TEST_INSTANCE,
             "skill_name": f"test_skill_{int(time.time())}",
-            "description": "测试技�?,
+            "description": "测试技能",
             "content": "# 测试技能\n\n这是测试内容"
         })
         assert resp.status_code == 200
@@ -83,7 +83,7 @@ class TestServer:
         assert data["status"] == "ok"
     
     def test_download_skills(self):
-        """测试下载技�?""
+        """测试下载技能"""
         resp = requests.get(f"{SERVER_URL}/api/download/skills")
         assert resp.status_code == 200
         data = resp.json()
