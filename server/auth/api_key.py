@@ -34,6 +34,11 @@ class APIKeyAuth:
         self.rate_limits: Dict[str, list] = {}  # instance_id -> [timestamps]
         self.rate_limit_window = 60  # 60秒窗口
         self.rate_limit_max = 60     # 最大60请求
+        self._store = None  # DataStore 引用，由 set_store() 注入
+    
+    def set_store(self, store) -> None:
+        """注入 DataStore 引用（供装饰器检查审批状态）"""
+        self._store = store
         
     def verify_admin(self, api_key: str) -> bool:
         """验证管理员 API Key"""
@@ -100,24 +105,49 @@ class APIKeyAuth:
             return f(*args, **kwargs)
         return decorated
     
-    def require_client(self, f):
-        """客户端权限装饰器"""
-        @wraps(f)
-        def decorated(*args, **kwargs):
-            api_key = request.headers.get('X-API-Key')
-            instance_id = request.headers.get('X-Instance-ID')
-            
-            if not api_key or not instance_id:
-                return jsonify({'error': 'Missing credentials', 'code': 'CREDENTIALS_REQUIRED'}), 401
-            
-            if not self.verify_client(instance_id, api_key):
-                return jsonify({'error': 'Invalid credentials', 'code': 'INVALID_KEY'}), 401
+    def require_client(self, f=None, *, require_approved: bool = False):
+        """
+        客户端权限装饰器（一步完成：认证 + 限流 + 可选审批检查）
+        
+        用法:
+            @auth.require_client                          # 仅认证+限流
+            @auth.require_client(require_approved=True)   # 认证+限流+审批检查
+        
+        认证通过后，instance_id 和 api_key 挂到 request 上供路由直接使用：
+            request.instance_id
+            request.api_key
+        """
+        def decorator(fn):
+            @wraps(fn)
+            def decorated(*args, **kwargs):
+                api_key = request.headers.get('X-API-Key')
+                instance_id = request.headers.get('X-Instance-ID')
                 
-            if not self.check_rate_limit(instance_id):
-                return jsonify({'error': 'Rate limit exceeded', 'code': 'RATE_LIMIT'}), 429
+                if not api_key or not instance_id:
+                    return jsonify({'error': 'Missing credentials', 'code': 'CREDENTIALS_REQUIRED'}), 401
                 
-            return f(*args, **kwargs)
-        return decorated
+                if not self.verify_client(instance_id, api_key):
+                    return jsonify({'error': 'Invalid credentials', 'code': 'INVALID_KEY'}), 401
+                
+                if not self.check_rate_limit(instance_id):
+                    return jsonify({'error': 'Rate limit exceeded', 'code': 'RATE_LIMIT'}), 429
+                
+                # 可选：检查实例是否已审批
+                if require_approved and self._store:
+                    if not self._store.is_instance_approved(instance_id):
+                        return jsonify({'error': 'Instance not approved', 'code': 'NOT_APPROVED'}), 403
+                
+                # 注入到 request 上，路由函数可直接使用
+                request.instance_id = instance_id
+                request.api_key = api_key
+                
+                return fn(*args, **kwargs)
+            return decorated
+        
+        # 支持 @auth.require_client 和 @auth.require_client(require_approved=True) 两种写法
+        if f is not None:
+            return decorator(f)
+        return decorator
 
 
 def create_auth(persisted_keys: Dict[str, str] = None) -> APIKeyAuth:

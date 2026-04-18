@@ -59,6 +59,7 @@ os.makedirs(DB_PATH, exist_ok=True)
 # store 必须在 auth 之前初始化，因为 create_auth 需要 store.get_client_keys()
 store = DataStore(DB_PATH)
 auth = create_auth(persisted_keys=store.get_client_keys())
+auth.set_store(store)  # 注入 DataStore，供 require_client(require_approved=True) 使用
 
 # 分布式协调者（参数由 distributed.config.CLUSTER_CONFIG 提供）
 # 但先用 Config 的 env 覆盖，以支持运行时配置
@@ -276,19 +277,10 @@ def ping():
 
 
 @app.route('/api/download/thoughts')
+@auth.require_client
 def download_thoughts():
     """下载思想（需认证）"""
-    api_key = request.headers.get('X-API-Key')
-    instance_id = request.headers.get('X-Instance-ID')
-    
-    if not api_key or not instance_id:
-        return jsonify({'error': 'Missing credentials'}), 401
-    
-    if not auth.verify_client(instance_id, api_key):
-        return jsonify({'error': 'Invalid credentials'}), 401
-    
-    if not auth.check_rate_limit(instance_id):
-        return jsonify({'error': 'Rate limit exceeded'}), 429
+    instance_id = request.instance_id
     
     # 过滤参数
     thought_type = request.args.get('type')
@@ -301,19 +293,9 @@ def download_thoughts():
 
 
 @app.route('/api/download/skills')
+@auth.require_client
 def download_skills():
     """下载技能（需认证）"""
-    api_key = request.headers.get('X-API-Key')
-    instance_id = request.headers.get('X-Instance-ID')
-    
-    if not api_key or not instance_id:
-        return jsonify({'error': 'Missing credentials'}), 401
-    
-    if not auth.verify_client(instance_id, api_key):
-        return jsonify({'error': 'Invalid credentials'}), 401
-    
-    if not auth.check_rate_limit(instance_id):
-        return jsonify({'error': 'Rate limit exceeded'}), 429
     
     # 读存储（线程安全）
     skills = store.get_skills()
@@ -322,23 +304,10 @@ def download_skills():
 
 
 @app.route('/api/upload/thought', methods=['POST'])
+@auth.require_client(require_approved=True)
 def upload_thought():
     """上传思想（需认证+审批）"""
-    api_key = request.headers.get('X-API-Key')
-    instance_id = request.headers.get('X-Instance-ID')
-    
-    if not api_key or not instance_id:
-        return jsonify({'error': 'Missing credentials'}), 401
-    
-    if not auth.verify_client(instance_id, api_key):
-        return jsonify({'error': 'Invalid credentials'}), 401
-    
-    if not auth.check_rate_limit(instance_id):
-        return jsonify({'error': 'Rate limit exceeded'}), 429
-    
-    # 检查实例是否已批准（线程安全）
-    if not store.is_instance_approved(instance_id):
-        return jsonify({'error': 'Instance not approved'}), 403
+    instance_id = request.instance_id
     
     data = request.get_json() or {}
     
@@ -362,23 +331,10 @@ def upload_thought():
 
 
 @app.route('/api/upload/skill', methods=['POST'])
+@auth.require_client(require_approved=True)
 def upload_skill():
-    """上传技能（需认证）"""
-    api_key = request.headers.get('X-API-Key')
-    instance_id = request.headers.get('X-Instance-ID')
-    
-    if not api_key or not instance_id:
-        return jsonify({'error': 'Missing credentials'}), 401
-    
-    if not auth.verify_client(instance_id, api_key):
-        return jsonify({'error': 'Invalid credentials'}), 401
-    
-    if not auth.check_rate_limit(instance_id):
-        return jsonify({'error': 'Rate limit exceeded'}), 429
-    
-    # 检查实例是否已批准
-    if not store.is_instance_approved(instance_id):
-        return jsonify({'error': 'Instance not approved'}), 403
+    """上传技能（需认证+审批）"""
+    instance_id = request.instance_id
     
     data = request.get_json() or {}
     
@@ -400,13 +356,9 @@ def upload_skill():
 
 
 @app.route('/api/instances')
+@auth.require_admin
 def list_instances():
     """列出实例（需管理员）"""
-    api_key = request.headers.get('X-API-Key')
-    
-    if not api_key or not auth.verify_admin(api_key):
-        return jsonify({'error': 'Unauthorized'}), 401
-    
     instances = store.get_instances()
     return jsonify({'instances': list(instances.values())})
 
@@ -414,11 +366,9 @@ def list_instances():
 # ============== 管理员 API ==============
 
 @app.route('/api/admin/approve_instance', methods=['POST'])
+@auth.require_admin
 def approve_instance():
     """批准实例"""
-    api_key = request.headers.get('X-API-Key')
-    if not api_key or not auth.verify_admin(api_key):
-        return jsonify({'error': 'Unauthorized'}), 401
     
     data = request.get_json() or {}
     instance_id = data.get('instance_id')
@@ -434,11 +384,9 @@ def approve_instance():
 
 
 @app.route('/api/admin/revoke_instance', methods=['POST'])
+@auth.require_admin
 def revoke_instance():
     """撤销实例"""
-    api_key = request.headers.get('X-API-Key')
-    if not api_key or not auth.verify_admin(api_key):
-        return jsonify({'error': 'Unauthorized'}), 401
     
     data = request.get_json() or {}
     instance_id = data.get('instance_id')
@@ -450,11 +398,9 @@ def revoke_instance():
 
 
 @app.route('/api/admin/add_client_key', methods=['POST'])
+@auth.require_admin
 def add_client_key():
     """添加/更新客户端 Key（持久化到磁盘，重启不丢失）"""
-    api_key = request.headers.get('X-API-Key')
-    if not api_key or not auth.verify_admin(api_key):
-        return jsonify({'error': 'Unauthorized'}), 401
     
     data = request.get_json() or {}
     instance_id = data.get('instance_id')
@@ -476,11 +422,9 @@ def add_client_key():
 
 
 @app.route('/api/admin/remove_client_key', methods=['POST'])
+@auth.require_admin
 def remove_client_key():
     """移除客户端 Key（同时从 auth 内存和磁盘删除）"""
-    api_key = request.headers.get('X-API-Key')
-    if not api_key or not auth.verify_admin(api_key):
-        return jsonify({'error': 'Unauthorized'}), 401
     
     data = request.get_json() or {}
     instance_id = data.get('instance_id')
@@ -523,11 +467,9 @@ def cluster_nodes():
 
 
 @app.route('/api/cluster/add_node', methods=['POST'])
+@auth.require_admin
 def add_cluster_node():
     """添加集群节点（需管理员）"""
-    api_key = request.headers.get('X-API-Key')
-    if not api_key or not auth.verify_admin(api_key):
-        return jsonify({'error': 'Unauthorized'}), 401
     
     data = request.get_json() or {}
     node_id = data.get('node_id')
@@ -543,11 +485,9 @@ def add_cluster_node():
 
 
 @app.route('/api/cluster/remove_node', methods=['POST'])
+@auth.require_admin
 def remove_cluster_node():
     """移除集群节点（需管理员）"""
-    api_key = request.headers.get('X-API-Key')
-    if not api_key or not auth.verify_admin(api_key):
-        return jsonify({'error': 'Unauthorized'}), 401
     
     data = request.get_json() or {}
     node_id = data.get('node_id')
