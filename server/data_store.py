@@ -282,8 +282,11 @@ class DataStore:
     def replica_store(self, data_id: str, data_type: str, content: Dict) -> bool:
         """存储副本数据（节点间调用）"""
         with self._lock:
+            # 规范化：将 data_id 作为内容的 id 字段
+            if 'id' not in content:
+                content['id'] = data_id
+
             if data_type == 'thought':
-                # 检查是否已存在
                 for i, t in enumerate(self._thoughts):
                     if t.get('id') == data_id:
                         self._thoughts[i] = content

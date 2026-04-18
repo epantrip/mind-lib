@@ -32,6 +32,9 @@ from auth.api_key import create_auth, APIKeyAuth
 # 导入线程安全数据存储层
 from data_store import DataStore
 
+# 导入节点间认证（P1: 分布式节点 API 签名认证）
+from node_auth import get_node_auth
+
 # 配置日志
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
@@ -53,6 +56,9 @@ coordinator = DistributedCoordinator(node_id='mind_hub_primary')
 
 # 线程安全数据存储层（P0: 并发安全）
 store = DataStore(DB_PATH)
+
+# 节点间认证（P1）
+node_auth = get_node_auth()
 
 
 def notify_webhook(payload):
@@ -401,6 +407,7 @@ def add_client_key():
 # ============== 分布式集群 API ==============
 
 @app.route('/api/cluster/nodes')
+@auth.require_admin
 def cluster_nodes():
     """列出集群节点"""
     return jsonify({
@@ -453,6 +460,7 @@ def remove_cluster_node():
 
 
 @app.route('/api/cluster/status')
+@auth.require_admin
 def cluster_status():
     """获取集群详细状态"""
     return jsonify(coordinator.get_cluster_status())
@@ -461,6 +469,7 @@ def cluster_status():
 # ============== 副本存储 API（分布式节点间通信）=============
 
 @app.route('/api/replica/store', methods=['POST'])
+@node_auth.require_node_auth
 def replica_store():
     """存储副本数据（节点间调用）"""
     data = request.get_json() or {}
@@ -478,6 +487,7 @@ def replica_store():
 
 
 @app.route('/api/replica/get/<data_id>')
+@node_auth.require_node_auth
 def replica_get(data_id):
     """获取副本数据（节点间调用）"""
     # 读取副本（线程安全）
@@ -493,6 +503,7 @@ def replica_get(data_id):
 
 
 @app.route('/api/sync/pull', methods=['POST'])
+@node_auth.require_node_auth
 def sync_pull():
     """节点间数据同步拉取"""
     data = request.get_json() or {}
