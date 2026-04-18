@@ -1,5 +1,5 @@
 """
-Mind Library 分布式安全版 - 主服务器 v2.1.0
+Mind Library 分布式安全版 - 主服务器 v2.1.1 (Thread-Safe)
 
 特性：
 - 分布式集群支持（一致性哈希 + 多副本）
@@ -7,6 +7,7 @@ Mind Library 分布式安全版 - 主服务器 v2.1.0
 - 实例审批机制
 - 速率限制
 - Webhook 通知
+- 线程安全（P0）
 """
 
 import os
@@ -28,6 +29,9 @@ from distributed import (
 # 导入认证模块
 from auth.api_key import create_auth, APIKeyAuth
 
+# 导入线程安全数据存储层
+from data_store import DataStore
+
 # 配置日志
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
@@ -47,105 +51,12 @@ auth = create_auth()
 # 分布式协调者
 coordinator = DistributedCoordinator(node_id='mind_hub_primary')
 
-# 本地数据存储（主节点数据）
-thoughts = []
-skills = []
-instances = {}
-
-
-# ============== 辅助函数 ==============
-def load_data(filename, default=None):
-    """加载数据文件（兼容v2.0目录式存储）"""
-    if default is None:
-        default = []
-    path = os.path.join(DB_PATH, filename)
-    # instances: 支持从目录加载单个json文件（v2.0兼容）
-    if filename == 'instances.json':
-        dir_path = os.path.join(DB_PATH, 'instances')
-        if os.path.isdir(dir_path):
-            result = {}
-            for fname in os.listdir(dir_path):
-                if fname.endswith('.json'):
-                    try:
-                        with open(os.path.join(dir_path, fname), 'r', encoding='utf-8') as f:
-                            data = json.load(f)
-                            iid = data.get('id') or data.get('instance_id') or fname.replace('.json', '')
-                            result[iid] = data
-                    except Exception:
-                        pass
-            return result
-    # thoughts/skills: 支持从目录加载（v2.0兼容）
-    if filename in ('thoughts.json', 'skills.json') and not os.path.exists(path):
-        dir_name = filename.replace('.json', '')
-        dir_path = os.path.join(DB_PATH, dir_name)
-        if os.path.isdir(dir_path):
-            result = []
-            for fname in sorted(os.listdir(dir_path)):
-                if fname.endswith('.json'):
-                    try:
-                        with open(os.path.join(dir_path, fname), 'r', encoding='utf-8') as f:
-                            result.append(json.load(f))
-                    except Exception:
-                        pass
-            return result
-    if os.path.exists(path):
-        try:
-            with open(path, 'r', encoding='utf-8') as f:
-                return json.load(f)
-        except Exception as e:
-            logger.warning(f"加载 {filename} 失败: {e}")
-    return default
-
-
-def save_data(filename, data):
-    """保存数据文件（兼容v2.0目录式存储）"""
-    # instances: 保存到目录下单独文件（v2.0兼容）
-    if filename == 'instances.json' and isinstance(data, dict):
-        dir_path = os.path.join(DB_PATH, 'instances')
-        os.makedirs(dir_path, exist_ok=True)
-        for iid, inst_data in data.items():
-            try:
-                with open(os.path.join(dir_path, f'{iid}.json'), 'w', encoding='utf-8') as f:
-                    json.dump(inst_data, f, ensure_ascii=False, indent=2)
-            except Exception as e:
-                logger.error(f"保存实例 {iid} 失败: {e}")
-        return
-    # thoughts/skills: 保存到目录下单独文件（v2.0兼容）
-    if filename in ('thoughts.json', 'skills.json') and isinstance(data, list):
-        dir_name = filename.replace('.json', '')
-        dir_path = os.path.join(DB_PATH, dir_name)
-        os.makedirs(dir_path, exist_ok=True)
-        for item in data:
-            item_id = item.get('id') or item.get('instance_id', '')
-            ts = item.get('timestamp', item.get('created_at', ''))
-            if item_id and ts:
-                fname = f"{item_id}_{ts.replace('-','').replace(':','').replace('.','')}.json"
-            elif item_id:
-                fname = f"{item_id}.json"
-            else:
-                fname = f"{int(time.time())}.json"
-            try:
-                with open(os.path.join(dir_path, fname), 'w', encoding='utf-8') as f:
-                    json.dump(item, f, ensure_ascii=False, indent=2)
-            except Exception as e:
-                logger.error(f"保存到 {fname} 失败: {e}")
-        return
-    path = os.path.join(DB_PATH, filename)
-    try:
-        with open(path, 'w', encoding='utf-8') as f:
-            json.dump(data, f, ensure_ascii=False, indent=2)
-    except Exception as e:
-        logger.error(f"保存 {filename} 失败: {e}")
-
-
-# 初始化数据
-thoughts = load_data('thoughts.json', [])
-skills = load_data('skills.json', [])
-instances = load_data('instances.json', {})
+# 线程安全数据存储层（P0: 并发安全）
+store = DataStore(DB_PATH)
 
 
 def notify_webhook(payload):
-    """发送 Webhook 通知"""
+    """发送 Webhook 通知（网络 I/O，在锁外调用）"""
     webhook_url = os.environ.get('MIND_NOTIFICATION_WEBHOOK')
     if not webhook_url:
         return
@@ -163,18 +74,15 @@ def notify_webhook(payload):
 @app.route('/')
 def index():
     """Web 仪表盘"""
-    stats = {
-        'version': '2.1.0',
-        'thoughts': len(thoughts),
-        'skills': len(skills),
-        'instances': len([i for i in instances.values() if i.get('approved')]),
-        'pending': len([i for i in instances.values() if not i.get('approved')]),
+    stats = store.get_stats()
+    stats.update({
+        'version': '2.1.1',
         'coordinator_status': coordinator.status.value,
         'cluster_nodes': len(coordinator.node_manager.nodes),
-    }
+    })
     
     html = '''<!DOCTYPE html>
-<html><head><meta charset="utf-8"><title>Mind Library v2.1.0</title>
+<html><head><meta charset="utf-8"><title>Mind Library v2.1.1</title>
 <style>
 body{font-family:Arial,sans-serif;max-width:800px;margin:0 auto;padding:20px;background:#f5f5f5}
 h1{color:#333}.card{background:white;border-radius:8px;padding:20px;margin:10px 0;box-shadow:0 2px 4px rgba(0,0,0,0.1)}
@@ -182,14 +90,14 @@ h1{color:#333}.card{background:white;border-radius:8px;padding:20px;margin:10px 
 .status{color:#2196F3;font-weight:bold}.status-standby{color:#FF9800}
 </style></head>
 <body>
-<h1>Mind Library v2.1.0</h1>
+<h1>Mind Library v2.1.1</h1>
 <div class="card">
 <h2>系统状态</h2>
 <p><span class="label">版本:</span> <span class="stat">{{stats.version}}</span></p>
 <p><span class="label">思想数量:</span> <span class="stat">{{stats.thoughts}}</span></p>
 <p><span class="label">技能数量:</span> <span class="stat">{{stats.skills}}</span></p>
-<p><span class="label">已批准实例:</span> <span class="stat">{{stats.instances}}</span></p>
-<p><span class="label">待审批:</span> <span class="stat">{{stats.pending}}</span></p>
+<p><span class="label">已批准实例:</span> <span class="stat">{{stats.approved_instances}}</span></p>
+<p><span class="label">待审批:</span> <span class="stat">{{stats.pending_instances}}</span></p>
 </div>
 <div class="card">
 <h2>分布式集群</h2>
@@ -211,9 +119,10 @@ def health():
     """健康检查"""
     return jsonify({
         'status': 'ok',
-        'version': '2.1.0',
+        'version': '2.1.1',
         'distributed': True,
         'secure': True,
+        'thread_safe': True,
         'timestamp': datetime.now().isoformat()
     })
 
@@ -221,20 +130,15 @@ def health():
 @app.route('/api/stats')
 def stats():
     """统计信息"""
-    return jsonify({
-        'thoughts': len(thoughts),
-        'skills': len(skills),
-        'instances': {
-            'total': len(instances),
-            'approved': len([i for i in instances.values() if i.get('approved')]),
-            'pending': len([i for i in instances.values() if not i.get('approved')])
-        },
+    stats_data = store.get_stats()
+    stats_data.update({
         'coordinator': {
             'status': coordinator.status.value,
             'nodes': len(coordinator.node_manager.nodes),
             'replication': coordinator.replication_manager.status.value if hasattr(coordinator.replication_manager, 'status') else 'active'
         }
     })
+    return jsonify(stats_data)
 
 
 # ============== 客户端 API ==============
@@ -250,13 +154,13 @@ def register():
     if not instance_id:
         return jsonify({'error': 'instance_id is required'}), 400
     
-    if instance_id in instances:
+    if store.instance_exists(instance_id):
         return jsonify({'error': 'Instance already exists'}), 409
     
     # 生成 Token
     token = hashlib.sha256(f"{instance_id}_{time.time()}".encode()).hexdigest()[:32]
     
-    instances[instance_id] = {
+    instance = {
         'id': instance_id,
         'name': instance_name,
         'description': description,
@@ -265,14 +169,16 @@ def register():
         'created_at': datetime.now().isoformat(),
         'last_seen': time.time()
     }
-    save_data('instances.json', instances)
     
-    # Webhook 通知
+    # 写存储（线程安全）
+    store.add_instance(instance)
+    
+    # Webhook 通知（在锁外）
     notify_webhook({
         'event': 'new_instance_registration',
         'message': f'New instance {instance_id} ({instance_name}) registered and awaiting approval',
         'timestamp': datetime.now().isoformat(),
-        'instance': instances[instance_id]
+        'instance': instance
     })
     
     return jsonify({
@@ -288,9 +194,8 @@ def ping():
     data = request.get_json() or {}
     instance_id = data.get('instance_id')
     
-    if instance_id and instance_id in instances:
-        instances[instance_id]['last_seen'] = time.time()
-        save_data('instances.json', instances)
+    if instance_id and store.instance_exists(instance_id):
+        store.update_instance(instance_id, {'last_seen': time.time()})
     
     return jsonify({'status': 'ok', 'timestamp': time.time()})
 
@@ -314,9 +219,8 @@ def download_thoughts():
     thought_type = request.args.get('type')
     since = request.args.get('since', '0')
     
-    result = [t for t in thoughts if t.get('created_at', '') > since]
-    if thought_type:
-        result = [t for t in result if t.get('type') == thought_type]
+    # 读存储（线程安全）
+    result = store.get_thoughts(since=since, thought_type=thought_type)
     
     return jsonify({'thoughts': result, 'count': len(result)})
 
@@ -336,6 +240,9 @@ def download_skills():
     if not auth.check_rate_limit(instance_id):
         return jsonify({'error': 'Rate limit exceeded'}), 429
     
+    # 读存储（线程安全）
+    skills = store.get_skills()
+    
     return jsonify({'skills': skills, 'count': len(skills)})
 
 
@@ -354,8 +261,8 @@ def upload_thought():
     if not auth.check_rate_limit(instance_id):
         return jsonify({'error': 'Rate limit exceeded'}), 429
     
-    # 检查实例是否已批准
-    if instance_id not in instances or not instances[instance_id].get('approved'):
+    # 检查实例是否已批准（线程安全）
+    if not store.is_instance_approved(instance_id):
         return jsonify({'error': 'Instance not approved'}), 403
     
     data = request.get_json() or {}
@@ -370,10 +277,10 @@ def upload_thought():
         'tags': data.get('tags', [])
     }
     
-    thoughts.append(thought)
-    save_data('thoughts.json', thoughts)
+    # 写存储（线程安全，锁内完成内存+磁盘）
+    store.add_thought(thought)
     
-    # 分布式：同步到其他节点
+    # 分布式：同步到其他节点（在锁外，网络 I/O）
     coordinator.sync_thought(thought)
     
     return jsonify({'status': 'ok', 'thought_id': thought['id']})
@@ -395,7 +302,7 @@ def upload_skill():
         return jsonify({'error': 'Rate limit exceeded'}), 429
     
     # 检查实例是否已批准
-    if instance_id not in instances or not instances[instance_id].get('approved'):
+    if not store.is_instance_approved(instance_id):
         return jsonify({'error': 'Instance not approved'}), 403
     
     data = request.get_json() or {}
@@ -411,15 +318,8 @@ def upload_skill():
         'version': data.get('version', '1.0.0')
     }
     
-    # 更新已存在的技能
-    for i, s in enumerate(skills):
-        if s.get('name') == skill['name']:
-            skills[i] = skill
-            break
-    else:
-        skills.append(skill)
-    
-    save_data('skills.json', skills)
+    # 写存储（线程安全）
+    store.add_skill(skill)
     
     return jsonify({'status': 'ok', 'skill_id': skill['id']})
 
@@ -432,6 +332,7 @@ def list_instances():
     if not api_key or not auth.verify_admin(api_key):
         return jsonify({'error': 'Unauthorized'}), 401
     
+    instances = store.get_instances()
     return jsonify({'instances': list(instances.values())})
 
 
@@ -447,11 +348,12 @@ def approve_instance():
     data = request.get_json() or {}
     instance_id = data.get('instance_id')
     
-    if instance_id not in instances:
+    instance = store.get_instance(instance_id)
+    if not instance:
         return jsonify({'error': 'Instance not found'}), 404
     
-    instances[instance_id]['approved'] = True
-    save_data('instances.json', instances)
+    # 更新实例（线程安全）
+    store.update_instance(instance_id, {'approved': True})
     
     return jsonify({'status': 'ok', 'message': f'Instance {instance_id} approved'})
 
@@ -466,9 +368,8 @@ def revoke_instance():
     data = request.get_json() or {}
     instance_id = data.get('instance_id')
     
-    if instance_id in instances:
-        del instances[instance_id]
-        save_data('instances.json', instances)
+    # 删除实例（线程安全）
+    store.delete_instance(instance_id)
     
     return jsonify({'status': 'ok', 'message': f'Instance {instance_id} revoked'})
 
@@ -490,11 +391,9 @@ def add_client_key():
     # 在认证系统中添加 key
     auth.client_keys[instance_id] = new_key
     
-    # 更新实例
-    if instance_id in instances:
-        instances[instance_id]['token'] = new_key
-        instances[instance_id]['approved'] = True
-        save_data('instances.json', instances)
+    # 更新实例（线程安全）
+    if store.instance_exists(instance_id):
+        store.update_instance(instance_id, {'token': new_key, 'approved': True})
     
     return jsonify({'status': 'ok', 'message': f'API key added for {instance_id}'})
 
@@ -572,24 +471,8 @@ def replica_store():
     if not data_id or not content:
         return jsonify({'error': 'data_id and content required'}), 400
     
-    # 根据类型存储
-    if data_type == 'thought':
-        # 检查是否已存在
-        for i, t in enumerate(thoughts):
-            if t.get('id') == data_id:
-                thoughts[i] = content
-                break
-        else:
-            thoughts.append(content)
-        save_data('thoughts.json', thoughts)
-    elif data_type == 'skill':
-        for i, s in enumerate(skills):
-            if s.get('id') == data_id:
-                skills[i] = content
-                break
-        else:
-            skills.append(content)
-        save_data('skills.json', skills)
+    # 存储副本（线程安全）
+    success = store.replica_store(data_id, data_type, content)
     
     return jsonify({'status': 'ok', 'data_id': data_id})
 
@@ -597,25 +480,14 @@ def replica_store():
 @app.route('/api/replica/get/<data_id>')
 def replica_get(data_id):
     """获取副本数据（节点间调用）"""
-    # 在思想中查找
-    for t in thoughts:
-        if t.get('id') == data_id:
-            return jsonify({
-                'data_id': data_id,
-                'data_type': 'thought',
-                'content': t,
-                'found': True
-            })
+    # 读取副本（线程安全）
+    result = store.replica_get(data_id)
     
-    # 在技能中查找
-    for s in skills:
-        if s.get('id') == data_id:
-            return jsonify({
-                'data_id': data_id,
-                'data_type': 'skill',
-                'content': s,
-                'found': True
-            })
+    if result:
+        return jsonify({
+            'data_id': data_id,
+            **result
+        })
     
     return jsonify({'found': False, 'data_id': data_id})
 
@@ -626,12 +498,11 @@ def sync_pull():
     data = request.get_json() or {}
     source_node = data.get('source_node')
     
-    # 返回本地数据供同步
-    return jsonify({
-        'thoughts': thoughts,
-        'skills': skills,
-        'timestamp': datetime.now().isoformat()
-    })
+    # 获取全部数据（线程安全）
+    sync_data = store.get_all_for_sync()
+    sync_data['timestamp'] = datetime.now().isoformat()
+    
+    return jsonify(sync_data)
 
 
 # ============== 错误处理 ==============
@@ -659,12 +530,13 @@ if __name__ == '__main__':
     debug = os.environ.get('DEBUG', 'false').lower() == 'true'
     
     print("=" * 50)
-    print("Mind Library v2.1.0 分布式安全版")
+    print("Mind Library v2.1.1 分布式安全版 (Thread-Safe)")
     print("=" * 50)
     print(f"存储路径: {DB_PATH}")
     print(f"监听端口: {port}")
     print(f"认证: API Key + 实例审批")
     print(f"分布式: 启用")
+    print(f"线程安全: 启用 (RLock)")
     print("=" * 50)
     
     app.run(host='0.0.0.0', port=port, debug=debug)
