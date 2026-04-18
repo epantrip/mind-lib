@@ -516,6 +516,80 @@ def sync_pull():
     return jsonify(sync_data)
 
 
+# ============== P2: 数据迁移 API（分布式节点间通信）==============
+# P1: 需 HMAC 签名认证
+# 用途：节点加入时，旧节点返回应迁移给该节点的数据列表
+
+@app.route('/api/replica/migrate')
+@node_auth.require_node_auth
+def replica_migrate():
+    """
+    返回应迁移给目标节点的数据列表
+
+    Query params:
+        target: 目标节点 ID（迁移数据的新归属节点）
+
+    逻辑：
+    1. 遍历本地存储的所有 data_id
+    2. 对每个 data_id，用 hash_ring 计算现在应该属于哪些节点
+    3. 如果 target 在目标节点列表中，说明这个数据应该迁到 target
+    4. 返回所有应迁移的数据
+    """
+    from distributed.sharding import ConsistentHashRing, Node
+
+    target_node = request.args.get('target', '')
+
+    if not target_node:
+        return jsonify({'error': 'target node ID required'}), 400
+
+    # 获取本地所有数据
+    all_thoughts = store.get_all_thoughts()
+    all_skills = store.get_skills()  # get_skills() 无参数=返回全部
+
+    items = []
+
+    # 计算每个 thought 应该属于哪个节点
+    for thought in all_thoughts:
+        data_id = thought.get('id', '')
+        if not data_id:
+            continue
+        # 用一致性哈希判断该数据现在属于哪些节点
+        # 协调者的 hash_ring 直接算
+        primary = coordinator.hash_ring.get_primary_node(data_id)
+        replicas = coordinator.hash_ring.get_replica_nodes(
+            data_id, coordinator.replication_factor
+        )
+        target_nodes = [primary] + (replicas[1:] if len(replicas) > 1 else [])
+
+        if target_node in target_nodes:
+            items.append({
+                'data_id': data_id,
+                'data_type': 'thought',
+                'content': thought,
+            })
+
+    # 计算每个 skill
+    for skill in all_skills:
+        data_id = skill.get('id', '')
+        if not data_id:
+            continue
+        primary = coordinator.hash_ring.get_primary_node(data_id)
+        replicas = coordinator.hash_ring.get_replica_nodes(
+            data_id, coordinator.replication_factor
+        )
+        target_nodes = [primary] + (replicas[1:] if len(replicas) > 1 else [])
+
+        if target_node in target_nodes:
+            items.append({
+                'data_id': data_id,
+                'data_type': 'skill',
+                'content': skill,
+            })
+
+    logger.info(f"[Migrate] 返回 {len(items)} 条应迁移数据到 {target_node}")
+    return jsonify({'target': target_node, 'items': items})
+
+
 # ============== 错误处理 ==============
 
 @app.errorhandler(404)
