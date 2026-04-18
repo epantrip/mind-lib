@@ -15,8 +15,9 @@ import json
 import logging
 import hashlib
 import time
+import uuid
 from datetime import datetime
-from flask import Flask, request, jsonify, render_template_string
+from flask import Flask, request, jsonify, render_template_string, make_response
 
 # 导入分布式模块（相对导入）
 from distributed import (
@@ -35,8 +36,11 @@ from data_store import DataStore
 # 导入节点间认证（P1: 分布式节点 API 签名认证）
 from node_auth import get_node_auth
 
-# 配置日志
-logging.basicConfig(level=logging.INFO)
+# 导入生产配置
+from config import Config
+
+# 配置日志（生产优先）
+Config.setup_logging()
 logger = logging.getLogger(__name__)
 
 # Flask 应用
@@ -44,15 +48,28 @@ app = Flask(__name__)
 app.config['JSON_SORT_KEYS'] = False
 
 # ============== 初始化 ==============
+# 启动时校验配置
+Config.validate()
+
 # 存储路径
-DB_PATH = os.environ.get('MIND_DB_PATH', '/root/mind_library')
+DB_PATH = Config.DB_PATH
 os.makedirs(DB_PATH, exist_ok=True)
 
 # 认证
 auth = create_auth()
 
-# 分布式协调者
-coordinator = DistributedCoordinator(node_id='mind_hub_primary')
+# 分布式协调者（参数由 distributed.config.CLUSTER_CONFIG 提供）
+# 但先用 Config 的 env 覆盖，以支持运行时配置
+from distributed.config import CLUSTER_CONFIG
+CLUSTER_CONFIG['virtual_nodes'] = Config.VIRTUAL_NODES
+CLUSTER_CONFIG['heartbeat_interval'] = Config.HEARTBEAT_INTERVAL
+CLUSTER_CONFIG['failure_threshold'] = Config.FAILURE_THRESHOLD
+CLUSTER_CONFIG['storage_limit_gb'] = Config.STORAGE_LIMIT // 1000  # 思想数→GB 近似
+
+coordinator = DistributedCoordinator(
+    node_id=Config.NODE_ID,
+    replication_factor=Config.REPLICA_FACTOR,
+)
 
 # 线程安全数据存储层（P0: 并发安全）
 store = DataStore(DB_PATH)
@@ -60,10 +77,56 @@ store = DataStore(DB_PATH)
 # 节点间认证（P1）
 node_auth = get_node_auth()
 
+# Webhook（从 Config 读取）
+webhook_url = Config.WEBHOOK_URL
+
+
+# ============== CORS + 请求追踪中间件 ==============
+
+@app.before_request
+def add_cors_and_request_id():
+    """每个请求添加 CORS 头和请求 ID，方便追踪。"""
+    # 生成请求 ID
+    request_id = request.headers.get('X-Request-ID') or str(uuid.uuid4())[:8]
+    request._request_id = request_id  # 存到 request 对象上
+
+    # CORS 响应头
+    if Config.CORS_ORIGINS:
+        origins = [o.strip() for o in Config.CORS_ORIGINS.split(',')]
+        origin = request.headers.get('Origin', '')
+        if origin in origins:
+            resp = make_response()
+            resp.headers['Access-Control-Allow-Origin'] = origin
+            resp.headers['Access-Control-Allow-Headers'] = (
+                'Content-Type, X-API-Key, X-Instance-ID, X-Node-Signature, X-Node-ID, X-Request-ID'
+            )
+            resp.headers['Access-Control-Allow-Methods'] = 'GET, POST, PUT, DELETE, OPTIONS'
+            resp.headers['Access-Control-Max-Age'] = '3600'
+            # Flask 会自动处理 OPTIONS 预检，但在这里先设置头
+            if request.method == 'OPTIONS':
+                resp.status_code = 204
+                return resp
+
+    # 记录请求（带请求 ID）
+    logger.info(f"[{request_id}] {request.method} {request.path}")
+
+
+@app.after_request
+def add_response_headers(response):
+    """每个响应添加安全头和请求 ID。"""
+    request_id = getattr(request, '_request_id', None)
+    if request_id:
+        response.headers['X-Request-ID'] = request_id
+    # 安全头
+    response.headers['X-Content-Type-Options'] = 'nosniff'
+    response.headers['X-Frame-Options'] = 'DENY'
+    response.headers['X-XSS-Protection'] = '1; mode=block'
+    response.headers['Strict-Transport-Security'] = 'max-age=31536000; includeSubDomains'
+    return response
+
 
 def notify_webhook(payload):
     """发送 Webhook 通知（网络 I/O，在锁外调用）"""
-    webhook_url = os.environ.get('MIND_NOTIFICATION_WEBHOOK')
     if not webhook_url:
         return
     
@@ -594,34 +657,71 @@ def replica_migrate():
 
 @app.errorhandler(404)
 def not_found(e):
-    return jsonify({'error': 'Not found', 'code': 'NOT_FOUND'}), 404
+    request_id = getattr(request, '_request_id', None)
+    resp = jsonify({'error': 'Not found', 'code': 'NOT_FOUND'})
+    if request_id:
+        resp.headers['X-Request-ID'] = request_id
+    return resp, 404
 
 
 @app.errorhandler(500)
 def server_error(e):
-    logger.error(f"Server error: {e}")
-    return jsonify({'error': 'Internal server error', 'code': 'INTERNAL_ERROR'}), 500
+    request_id = getattr(request, '_request_id', None)
+    logger.error(f"[{request_id}] Server error: {e}", exc_info=True)
+    resp = jsonify({
+        'error': 'Internal server error',
+        'code': 'INTERNAL_ERROR',
+        'request_id': request_id
+    })
+    if request_id:
+        resp.headers['X-Request-ID'] = request_id
+    return resp, 500
 
 
 @app.errorhandler(429)
 def rate_limited(e):
-    return jsonify({'error': 'Rate limit exceeded', 'code': 'RATE_LIMIT'}), 429
+    request_id = getattr(request, '_request_id', None)
+    resp = jsonify({'error': 'Rate limit exceeded', 'code': 'RATE_LIMIT'})
+    if request_id:
+        resp.headers['X-Request-ID'] = request_id
+    return resp, 429
+
+
+@app.errorhandler(Exception)
+def unhandled_exception(e):
+    """未捕获的异常兜底，避免服务器崩溃"""
+    request_id = getattr(request, '_request_id', None)
+    logger.exception(f"[{request_id}] Unhandled exception: {e}")
+    resp = jsonify({
+        'error': 'Internal server error',
+        'code': 'UNHANDLED_EXCEPTION',
+        'request_id': request_id
+    })
+    if request_id:
+        resp.headers['X-Request-ID'] = request_id
+    return resp, 500
 
 
 # ============== 启动 ==============
 
 if __name__ == '__main__':
-    port = int(os.environ.get('PORT', 5000))
-    debug = os.environ.get('DEBUG', 'false').lower() == 'true'
-    
     print("=" * 50)
     print("Mind Library v2.1.1 分布式安全版 (Thread-Safe)")
     print("=" * 50)
-    print(f"存储路径: {DB_PATH}")
-    print(f"监听端口: {port}")
-    print(f"认证: API Key + 实例审批")
-    print(f"分布式: 启用")
-    print(f"线程安全: 启用 (RLock)")
+    print(f"节点 ID:       {Config.NODE_ID}")
+    print(f"存储路径:      {Config.DB_PATH}")
+    print(f"持久化目录:    {Config.PERSIST_DIR}")
+    print(f"监听地址:      {Config.HOST}:{Config.PORT}")
+    print(f"日志级别:      {Config.LOG_LEVEL} {'(JSON)' if Config.LOG_JSON else ''}")
+    print(f"CORS 来源:     {Config.CORS_ORIGINS or '(未配置)'}")
+    print(f"DEBUG 模式:    {Config.DEBUG}")
+    print(f"线程安全:      启用 (RLock)")
+    print(f"节点间认证:    {'启用 (HMAC-SHA256)' if Config.NODE_SECRET else '未配置 (MIND_NODE_SECRET 未设置)'}")
+    print(f"管理员认证:    {'已配置' if Config.ADMIN_API_KEY else '未配置!'}")
     print("=" * 50)
-    
-    app.run(host='0.0.0.0', port=port, debug=debug)
+
+    app.run(
+        host=Config.HOST,
+        port=Config.PORT,
+        debug=Config.DEBUG
+    )
