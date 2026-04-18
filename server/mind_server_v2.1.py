@@ -1,5 +1,5 @@
 """
-Mind Library 分布式安全版 - 主服务器 v2.1.1 (Thread-Safe)
+Mind Library 分布式安全版 - 主服务器 v2.2.0 (Thread-Safe)
 
 特性：
 - 分布式集群支持（一致性哈希 + 多副本）
@@ -55,8 +55,10 @@ Config.validate()
 DB_PATH = Config.DB_PATH
 os.makedirs(DB_PATH, exist_ok=True)
 
-# 认证
-auth = create_auth()
+# 认证（持久化存储 + 环境变量加载客户端密钥）
+# store 必须在 auth 之前初始化，因为 create_auth 需要 store.get_client_keys()
+store = DataStore(DB_PATH)
+auth = create_auth(persisted_keys=store.get_client_keys())
 
 # 分布式协调者（参数由 distributed.config.CLUSTER_CONFIG 提供）
 # 但先用 Config 的 env 覆盖，以支持运行时配置
@@ -70,9 +72,6 @@ coordinator = DistributedCoordinator(
     node_id=Config.NODE_ID,
     replication_factor=Config.REPLICA_FACTOR,
 )
-
-# 线程安全数据存储层（P0: 并发安全）
-store = DataStore(DB_PATH)
 
 # 节点间认证（P1）
 node_auth = get_node_auth()
@@ -145,13 +144,13 @@ def index():
     """Web 仪表盘"""
     stats = store.get_stats()
     stats.update({
-        'version': '2.1.1',
+        'version': '2.2.0',
         'coordinator_status': coordinator.status.value,
         'cluster_nodes': len(coordinator.node_manager.nodes),
     })
     
     html = '''<!DOCTYPE html>
-<html><head><meta charset="utf-8"><title>Mind Library v2.1.1</title>
+<html><head><meta charset="utf-8"><title>Mind Library v2.2.0</title>
 <style>
 body{font-family:Arial,sans-serif;max-width:800px;margin:0 auto;padding:20px;background:#f5f5f5}
 h1{color:#333}.card{background:white;border-radius:8px;padding:20px;margin:10px 0;box-shadow:0 2px 4px rgba(0,0,0,0.1)}
@@ -159,7 +158,7 @@ h1{color:#333}.card{background:white;border-radius:8px;padding:20px;margin:10px 
 .status{color:#2196F3;font-weight:bold}.status-standby{color:#FF9800}
 </style></head>
 <body>
-<h1>Mind Library v2.1.1</h1>
+<h1>Mind Library v2.2.0</h1>
 <div class="card">
 <h2>系统状态</h2>
 <p><span class="label">版本:</span> <span class="stat">{{stats.version}}</span></p>
@@ -188,7 +187,7 @@ def health():
     """健康检查"""
     return jsonify({
         'status': 'ok',
-        'version': '2.1.1',
+        'version': '2.2.0',
         'distributed': True,
         'secure': True,
         'thread_safe': True,
@@ -197,8 +196,9 @@ def health():
 
 
 @app.route('/api/stats')
+@auth.require_admin
 def stats():
-    """统计信息"""
+    """统计信息（需管理员认证）"""
     stats_data = store.get_stats()
     stats_data.update({
         'coordinator': {
@@ -214,7 +214,7 @@ def stats():
 
 @app.route('/api/register', methods=['POST'])
 def register():
-    """注册新实例"""
+    """注册新实例 — 自动生成 API Key，无需手动配置环境变量"""
     data = request.get_json() or {}
     instance_id = data.get('instance_id')
     instance_name = data.get('instance_name', instance_id)
@@ -226,21 +226,25 @@ def register():
     if store.instance_exists(instance_id):
         return jsonify({'error': 'Instance already exists'}), 409
     
-    # 生成 Token
-    token = hashlib.sha256(f"{instance_id}_{time.time()}".encode()).hexdigest()[:32]
+    # 生成 API Key（同时作为实例 token 和认证凭据）
+    api_key = hashlib.sha256(f"{instance_id}_{time.time()}".encode()).hexdigest()[:32]
     
     instance = {
         'id': instance_id,
         'name': instance_name,
         'description': description,
         'approved': False,  # 需要审批
-        'token': token,
+        'token': api_key,
         'created_at': datetime.now().isoformat(),
         'last_seen': time.time()
     }
     
     # 写存储（线程安全）
     store.add_instance(instance)
+    
+    # 持久化 API Key（auth 内存 + DataStore 磁盘，重启不丢失）
+    auth.add_client_key(instance_id, api_key)
+    store.save_client_key(instance_id, api_key)
     
     # Webhook 通知（在锁外）
     notify_webhook({
@@ -253,7 +257,9 @@ def register():
     return jsonify({
         'message': 'Registration submitted, awaiting approval',
         'instance_id': instance_id,
-        'token': token
+        'api_key': api_key,
+        'approved': False,
+        'note': 'Use X-API-Key and X-Instance-ID headers for authenticated requests. Upload requires admin approval.'
     })
 
 
@@ -445,7 +451,7 @@ def revoke_instance():
 
 @app.route('/api/admin/add_client_key', methods=['POST'])
 def add_client_key():
-    """添加客户端 Key"""
+    """添加/更新客户端 Key（持久化到磁盘，重启不丢失）"""
     api_key = request.headers.get('X-API-Key')
     if not api_key or not auth.verify_admin(api_key):
         return jsonify({'error': 'Unauthorized'}), 401
@@ -457,14 +463,43 @@ def add_client_key():
     if not instance_id or not new_key:
         return jsonify({'error': 'instance_id and api_key required'}), 400
     
-    # 在认证系统中添加 key
-    auth.client_keys[instance_id] = new_key
+    # auth 内存 + DataStore 磁盘双重持久化
+    auth.add_client_key(instance_id, new_key)
+    store.save_client_key(instance_id, new_key)
     
-    # 更新实例（线程安全）
+    # 如果实例已存在，同步更新 token 和审批状态
     if store.instance_exists(instance_id):
         store.update_instance(instance_id, {'token': new_key, 'approved': True})
     
-    return jsonify({'status': 'ok', 'message': f'API key added for {instance_id}'})
+    logger.info(f"[Admin] 客户端 Key 已添加: instance={instance_id}")
+    return jsonify({'status': 'ok', 'message': f'API key added for {instance_id}', 'approved': True})
+
+
+@app.route('/api/admin/remove_client_key', methods=['POST'])
+def remove_client_key():
+    """移除客户端 Key（同时从 auth 内存和磁盘删除）"""
+    api_key = request.headers.get('X-API-Key')
+    if not api_key or not auth.verify_admin(api_key):
+        return jsonify({'error': 'Unauthorized'}), 401
+    
+    data = request.get_json() or {}
+    instance_id = data.get('instance_id')
+    
+    if not instance_id:
+        return jsonify({'error': 'instance_id required'}), 400
+    
+    auth.remove_client_key(instance_id)
+    store.remove_client_key(instance_id)
+    
+    logger.info(f"[Admin] 客户端 Key 已移除: instance={instance_id}")
+    return jsonify({'status': 'ok', 'message': f'API key removed for {instance_id}'})
+
+
+@app.route('/api/admin/list_client_keys')
+@auth.require_admin
+def list_client_keys():
+    """列出所有已注册的客户端 Key（不暴露密钥值）"""
+    return jsonify({'client_keys': auth.list_client_keys()})
 
 
 # ============== 分布式集群 API ==============
@@ -706,7 +741,7 @@ def unhandled_exception(e):
 
 if __name__ == '__main__':
     print("=" * 50)
-    print("Mind Library v2.1.1 分布式安全版 (Thread-Safe)")
+    print("Mind Library v2.2.0 分布式安全版 (Thread-Safe)")
     print("=" * 50)
     print(f"节点 ID:       {Config.NODE_ID}")
     print(f"存储路径:      {Config.DB_PATH}")

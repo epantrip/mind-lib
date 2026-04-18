@@ -38,6 +38,7 @@ class DataStore:
         self._thoughts: List[Dict] = []
         self._skills: List[Dict] = []
         self._instances: Dict[str, Dict] = {}
+        self._client_keys: Dict[str, str] = {}  # 持久化的客户端 API Key
         
         # 加载数据
         self._load_all()
@@ -49,6 +50,7 @@ class DataStore:
         self._thoughts = self._load_file('thoughts.json', [])
         self._skills = self._load_file('skills.json', [])
         self._instances = self._load_file('instances.json', {})
+        self._client_keys = self._load_file('client_keys.json', {})
         
         # 兼容 v2.0 目录式存储
         self._load_compat_directory()
@@ -277,6 +279,28 @@ class DataStore:
                 'pending_instances': len([i for i in self._instances.values() if not i.get('approved')]),
             }
     
+    # ==================== Client Keys ====================
+
+    def get_client_keys(self) -> Dict[str, str]:
+        """获取持久化的客户端 API Key"""
+        with self._lock:
+            return dict(self._client_keys)
+
+    def save_client_key(self, instance_id: str, api_key: str) -> None:
+        """持久化客户端 API Key（线程安全）"""
+        with self._lock:
+            self._client_keys[instance_id] = api_key
+            self._save_file('client_keys.json', self._client_keys)
+
+    def remove_client_key(self, instance_id: str) -> bool:
+        """删除持久化的客户端 API Key"""
+        with self._lock:
+            if instance_id in self._client_keys:
+                del self._client_keys[instance_id]
+                self._save_file('client_keys.json', self._client_keys)
+                return True
+        return False
+
     # ==================== Replica Operations ====================
     
     def replica_store(self, data_id: str, data_type: str, content: Dict) -> bool:
