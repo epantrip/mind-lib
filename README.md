@@ -1,5 +1,7 @@
 # 🧠 Mind Library - Distributed AI Collective Consciousness System
 
+[English](README.md) | [中文](README_ZH.md)
+
 <p align="center">
   <img src="https://img.shields.io/badge/Python-3.8+-blue.svg" alt="Python">
   <img src="https://img.shields.io/badge/License-MIT-green.svg" alt="License">
