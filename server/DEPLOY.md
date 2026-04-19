@@ -1,51 +1,51 @@
-# 生产部署指南
+# Production Deployment Guide
 
-## 快速启动
+## Quick Start
 
 ```bash
-# 1. 安装依赖
+# 1. Install dependencies
 pip install -r requirements.txt
 
-# 2. 配置环境变量（复制模板并填写）
+# 2. Configure environment variables (copy template and fill in)
 cp .env.example .env
 
-# 3. 开发模式
+# 3. Development mode
 python mind_server_v2.1.py
 
-# 4. 生产模式
+# 4. Production mode
 gunicorn -c gunicorn.conf.py mind_server_v2.1:app
 ```
 
-## 生产环境变量
+## Production Environment Variables
 
-| 变量 | 说明 | 示例 |
+| Variable | Description | Example |
 |------|------|------|
-| `MIND_ADMIN_API_KEY` | **必填** 管理员 API Key | `your-secure-random-key` |
-| `MIND_CLIENT_SECRET` | 客户端签名密钥 | `client-signing-secret` |
-| `MIND_NODE_SECRET` | **分布式必填** 节点间通信密钥 | `node-hmac-secret` |
-| `MIND_DB_PATH` | 数据存储路径 | `./data` |
-| `MIND_PORT` | 监听端口 | `5000` |
-| `MIND_HOST` | 监听地址 | `0.0.0.0` |
-| `MIND_LOG_LEVEL` | 日志级别 | `INFO` / `DEBUG` |
-| `MIND_LOG_JSON` | JSON 日志格式 | `true` / `false` |
-| `MIND_CORS_ORIGINS` | 允许的 CORS 源（逗号分隔） | `https://example.com` |
-| `MIND_WEBHOOK_URL` | 事件通知 Webhook | `https://your-webhook-url/notify` |
-| `MIND_DEBUG` | DEBUG 模式 | `false` |
+| `MIND_ADMIN_API_KEY` | **Required** Admin API Key | `your-secure-random-key` |
+| `MIND_CLIENT_SECRET` | Client signing secret | `client-signing-secret` |
+| `MIND_NODE_SECRET` | **Required for distributed mode** Node-to-node communication secret | `node-hmac-secret` |
+| `MIND_DB_PATH` | Data storage path | `./data` |
+| `MIND_PORT` | Listening port | `5000` |
+| `MIND_HOST` | Listening address | `0.0.0.0` |
+| `MIND_LOG_LEVEL` | Log level | `INFO` / `DEBUG` |
+| `MIND_LOG_JSON` | JSON log format | `true` / `false` |
+| `MIND_CORS_ORIGINS` | Allowed CORS origins (comma-separated) | `https://example.com` |
+| `MIND_WEBHOOK_URL` | Event notification Webhook | `https://your-webhook-url/notify` |
+| `MIND_DEBUG` | DEBUG mode | `false` |
 
-## Gunicorn 生产配置
+## Gunicorn Production Configuration
 
 ```bash
-# 默认配置（2-8 workers 自动检测）
+# Default configuration (2-8 workers auto-detected)
 gunicorn -c gunicorn.conf.py mind_server_v2.1:app
 
-# 自定义 workers
+# Custom workers
 GUNICORN_WORKERS=4 gunicorn -c gunicorn.conf.py mind_server_v2.1:app
 
-# 指定绑定地址
+# Specify bind address
 GUNICORN_BIND=127.0.0.1:8080 gunicorn -c gunicorn.conf.py mind_server_v2.1:app
 ```
 
-## Docker 部署
+## Docker Deployment
 
 ```dockerfile
 FROM python:3.11-slim
@@ -58,7 +58,7 @@ CMD ["gunicorn", "-c", "gunicorn.conf.py", "mind_server_v2.1:app"]
 ```
 
 ```bash
-# Docker Compose 示例
+# Docker Compose example
 docker build -t mind-library .
 docker run -d -p 5000:5000 \
   -e MIND_ADMIN_API_KEY=your-admin-key \
@@ -68,20 +68,20 @@ docker run -d -p 5000:5000 \
   mind-library
 ```
 
-## 健康检查
+## Health Check
 
 ```bash
-# HTTP 健康检查
+# HTTP health check
 curl http://localhost:5000/api/health
 
-# Docker/K8s 探针
+# Docker/K8s probe
 python health_check.py --url http://localhost:5000 --timeout 5
-# 退出码 0=健康，1=不健康
+# Exit code 0=healthy, 1=unhealthy
 ```
 
-## 进程管理
+## Process Management
 
-**systemd 示例** (`/etc/systemd/system/mind-library.service`):
+**systemd example** (`/etc/systemd/system/mind-library.service`):
 
 ```ini
 [Unit]
@@ -102,20 +102,20 @@ RestartSec=5
 WantedBy=multi-user.target
 ```
 
-## 升级
+## Upgrade
 
 ```bash
 git pull
 pip install -r requirements.txt
-# 如果使用 systemd:
+# If using systemd:
 sudo systemctl restart mind-library
 ```
 
-## 安全检查清单
+## Security Checklist
 
-- [ ] `MIND_ADMIN_API_KEY` 已设置且强度足够
-- [ ] `MIND_NODE_SECRET` 已设置（分布式模式）
-- [ ] CORS 白名单已配置（非 `*`）
-- [ ] 使用 HTTPS 终止（反向代理如 Nginx）
-- [ ] 日志级别为 `INFO`（生产），非 `DEBUG`
-- [ ] 防火墙仅开放必要端口
+- [ ] `MIND_ADMIN_API_KEY` is set and sufficiently strong
+- [ ] `MIND_NODE_SECRET` is set (distributed mode)
+- [ ] CORS whitelist configured (not `*`)
+- [ ] Using HTTPS termination (reverse proxy like Nginx)
+- [ ] Log level set to `INFO` (production), not `DEBUG`
+- [ ] Firewall only exposes necessary ports

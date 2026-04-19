@@ -1,9 +1,9 @@
 """
-🧠 Mind Library - 线程安全数据存储层
+🧠 Mind Library - Thread-safe Data Storage Layer
 
-P0: 并发安全
-- 使用 RLock 保护 thoughts/skills/instances 的读写
-- 锁只包内存操作 + 本地磁盘 I/O，网络 I/O 放锁外
+P0: Concurrency Safety
+- Uses RLock to protect reads/writes of thoughts/skills/instances
+- Locks cover memory operations + local disk I/O only; network I/O goes outside the lock
 """
 
 import os
@@ -19,58 +19,58 @@ logger = logging.getLogger(__name__)
 
 class DataStore:
     """
-    线程安全的数据存储层
-    
-    设计原则：
-    1. 锁只包内存读写 + 本地磁盘写入（毫秒级）
-    2. 网络 I/O（同步、webhook）必须在锁外调用
-    3. 读取操作也要加锁，防止读到部分写入的数据
+    Thread-safe data storage layer
+
+    Design Principles:
+    1. Locks cover memory reads/writes + local disk writes only (millisecond-level)
+    2. Network I/O (sync, webhooks) must be called outside the lock
+    3. Read operations must also be locked to prevent reading partially-written data
     """
-    
+
     def __init__(self, db_path: str):
         self.db_path = db_path
         os.makedirs(db_path, exist_ok=True)
-        
-        # 线程锁 - 保护所有数据操作
+
+        # Thread lock - protects all data operations
         self._lock = threading.RLock()
-        
-        # 内存缓存
+
+        # In-memory cache
         self._thoughts: List[Dict] = []
         self._skills: List[Dict] = []
         self._instances: Dict[str, Dict] = {}
-        self._client_keys: Dict[str, str] = {}  # 持久化的客户端 API Key
-        
-        # 加载数据
+        self._client_keys: Dict[str, str] = {}  # Persisted client API keys
+
+        # Load data
         self._load_all()
-    
-    # ==================== 私有方法 ====================
-    
+
+    # ==================== Private Methods ====================
+
     def _load_all(self) -> None:
-        """加载所有数据"""
+        """Load all data"""
         self._thoughts = self._load_file('thoughts.json', [])
         self._skills = self._load_file('skills.json', [])
         self._instances = self._load_file('instances.json', {})
         self._client_keys = self._load_file('client_keys.json', {})
-        
-        # 兼容 v2.0 目录式存储
+
+        # Compatibility with v2.0 directory-based storage
         self._load_compat_directory()
-        
-        logger.info(f"📂 数据加载完成: {len(self._thoughts)} 思想, {len(self._skills)} 技能, {len(self._instances)} 实例")
-    
+
+        logger.info(f"Data load complete: {len(self._thoughts)} thoughts, {len(self._skills)} skills, {len(self._instances)} instances")
+
     def _load_file(self, filename: str, default: Any) -> Any:
-        """加载单个数据文件"""
+        """Load a single data file"""
         path = os.path.join(self.db_path, filename)
         if os.path.exists(path):
             try:
                 with open(path, 'r', encoding='utf-8') as f:
                     return json.load(f)
             except Exception as e:
-                logger.warning(f"加载 {filename} 失败: {e}")
+                logger.warning(f"Failed to load {filename}: {e}")
         return default
-    
+
     def _load_compat_directory(self) -> None:
-        """兼容 v2.0 目录式存储"""
-        # instances: 从 instances/ 目录加载
+        """Compatibility with v2.0 directory-based storage"""
+        # instances: load from instances/ directory
         inst_dir = os.path.join(self.db_path, 'instances')
         if os.path.isdir(inst_dir):
             for fname in os.listdir(inst_dir):
@@ -82,8 +82,8 @@ class DataStore:
                             self._instances[iid] = data
                     except Exception:
                         pass
-        
-        # thoughts: 从 thoughts/ 目录加载
+
+        # thoughts: load from thoughts/ directory
         thoughts_dir = os.path.join(self.db_path, 'thoughts')
         if os.path.isdir(thoughts_dir):
             for fname in sorted(os.listdir(thoughts_dir)):
@@ -93,8 +93,8 @@ class DataStore:
                             self._thoughts.append(json.load(f))
                     except Exception:
                         pass
-        
-        # skills: 从 skills/ 目录加载
+
+        # skills: load from skills/ directory
         skills_dir = os.path.join(self.db_path, 'skills')
         if os.path.isdir(skills_dir):
             for fname in sorted(os.listdir(skills_dir)):
@@ -104,41 +104,41 @@ class DataStore:
                             self._skills.append(json.load(f))
                     except Exception:
                         pass
-    
+
     def _save_file(self, filename: str, data: Any) -> None:
-        """保存数据到文件"""
-        # 兼容 v2.0 目录式存储
+        """Save data to file"""
+        # Compatibility with v2.0 directory-based storage
         if filename == 'instances.json' and isinstance(data, dict):
             self._save_directory('instances', data)
             return
         if filename in ('thoughts.json', 'skills.json') and isinstance(data, list):
             self._save_directory(filename.replace('.json', ''), data)
             return
-        
-        # 默认 JSON 文件
+
+        # Default JSON file
         path = os.path.join(self.db_path, filename)
         try:
             with open(path, 'w', encoding='utf-8') as f:
                 json.dump(data, f, ensure_ascii=False, indent=2)
         except Exception as e:
-            logger.error(f"保存 {filename} 失败: {e}")
-    
+            logger.error(f"Failed to save {filename}: {e}")
+
     def _save_directory(self, dir_name: str, data: Any) -> None:
-        """保存到目录（v2.0 兼容）"""
+        """Save to directory (v2.0 compatibility)"""
         dir_path = os.path.join(self.db_path, dir_name)
         os.makedirs(dir_path, exist_ok=True)
-        
+
         if isinstance(data, dict):
-            # instances: 每个实例一个文件
+            # instances: one file per instance
             for iid, inst_data in data.items():
                 try:
                     fname = f"{iid}.json"
                     with open(os.path.join(dir_path, fname), 'w', encoding='utf-8') as f:
                         json.dump(inst_data, f, ensure_ascii=False, indent=2)
                 except Exception as e:
-                    logger.error(f"保存实例 {iid} 失败: {e}")
+                    logger.error(f"Failed to save instance {iid}: {e}")
         elif isinstance(data, list):
-            # thoughts/skills: 每个条目一个文件
+            # thoughts/skills: one file per entry
             for item in data:
                 item_id = item.get('id') or item.get('instance_id', '')
                 ts = item.get('timestamp', item.get('created_at', ''))
@@ -152,32 +152,32 @@ class DataStore:
                     with open(os.path.join(dir_path, fname), 'w', encoding='utf-8') as f:
                         json.dump(item, f, ensure_ascii=False, indent=2)
                 except Exception as e:
-                    logger.error(f"保存到 {fname} 失败: {e}")
-    
+                    logger.error(f"Failed to save {fname}: {e}")
+
     # ==================== Thoughts ====================
-    
+
     def get_thoughts(self, since: str = '', thought_type: str = None) -> List[Dict]:
-        """获取思想列表（线程安全）"""
+        """Get thought list (thread-safe)"""
         with self._lock:
             result = [t for t in self._thoughts if t.get('created_at', '') > since]
             if thought_type:
                 result = [t for t in result if t.get('type') == thought_type]
             return result
-    
+
     def get_all_thoughts(self) -> List[Dict]:
-        """获取所有思想"""
+        """Get all thoughts"""
         with self._lock:
             return list(self._thoughts)
-    
+
     def add_thought(self, thought: Dict) -> Dict:
-        """添加思想（线程安全）"""
+        """Add thought (thread-safe)"""
         with self._lock:
             self._thoughts.append(thought)
             self._save_file('thoughts.json', self._thoughts)
         return thought
-    
+
     def update_thought(self, thought_id: str, thought: Dict) -> bool:
-        """更新思想"""
+        """Update thought"""
         with self._lock:
             for i, t in enumerate(self._thoughts):
                 if t.get('id') == thought_id:
@@ -185,30 +185,30 @@ class DataStore:
                     self._save_file('thoughts.json', self._thoughts)
                     return True
         return False
-    
+
     # ==================== Skills ====================
-    
+
     def get_skills(self) -> List[Dict]:
-        """获取技能列表（线程安全）"""
+        """Get skills list (thread-safe)"""
         with self._lock:
             return list(self._skills)
-    
+
     def add_skill(self, skill: Dict) -> Dict:
-        """添加技能（线程安全）"""
+        """Add skill (thread-safe)"""
         with self._lock:
-            # 更新已存在的技能
+            # Update existing skill
             for i, s in enumerate(self._skills):
                 if s.get('name') == skill['name']:
                     self._skills[i] = skill
                     self._save_file('skills.json', self._skills)
                     return skill
-            # 新增
+            # New entry
             self._skills.append(skill)
             self._save_file('skills.json', self._skills)
         return skill
-    
+
     def update_skill(self, skill_id: str, skill: Dict) -> bool:
-        """更新技能"""
+        """Update skill"""
         with self._lock:
             for i, s in enumerate(self._skills):
                 if s.get('id') == skill_id:
@@ -216,60 +216,60 @@ class DataStore:
                     self._save_file('skills.json', self._skills)
                     return True
         return False
-    
+
     # ==================== Instances ====================
-    
+
     def get_instances(self) -> Dict[str, Dict]:
-        """获取所有实例"""
+        """Get all instances"""
         with self._lock:
             return dict(self._instances)
-    
+
     def get_instance(self, instance_id: str) -> Optional[Dict]:
-        """获取单个实例"""
+        """Get single instance"""
         with self._lock:
             return self._instances.get(instance_id)
-    
+
     def add_instance(self, instance: Dict) -> Dict:
-        """添加实例（线程安全）"""
+        """Add instance (thread-safe)"""
         with self._lock:
             instance_id = instance.get('id') or instance.get('instance_id')
             self._instances[instance_id] = instance
             self._save_file('instances.json', self._instances)
         return instance
-    
+
     def update_instance(self, instance_id: str, updates: Dict) -> bool:
-        """更新实例"""
+        """Update instance"""
         with self._lock:
             if instance_id in self._instances:
                 self._instances[instance_id].update(updates)
                 self._save_file('instances.json', self._instances)
                 return True
         return False
-    
+
     def delete_instance(self, instance_id: str) -> bool:
-        """删除实例"""
+        """Delete instance"""
         with self._lock:
             if instance_id in self._instances:
                 del self._instances[instance_id]
                 self._save_file('instances.json', self._instances)
                 return True
         return False
-    
+
     def instance_exists(self, instance_id: str) -> bool:
-        """检查实例是否存在"""
+        """Check if instance exists"""
         with self._lock:
             return instance_id in self._instances
-    
+
     def is_instance_approved(self, instance_id: str) -> bool:
-        """检查实例是否已批准"""
+        """Check if instance is approved"""
         with self._lock:
             inst = self._instances.get(instance_id)
             return inst is not None and inst.get('approved', False)
-    
+
     # ==================== Stats ====================
-    
+
     def get_stats(self) -> Dict:
-        """获取统计信息"""
+        """Get statistics"""
         with self._lock:
             return {
                 'thoughts': len(self._thoughts),
@@ -278,22 +278,22 @@ class DataStore:
                 'approved_instances': len([i for i in self._instances.values() if i.get('approved')]),
                 'pending_instances': len([i for i in self._instances.values() if not i.get('approved')]),
             }
-    
+
     # ==================== Client Keys ====================
 
     def get_client_keys(self) -> Dict[str, str]:
-        """获取持久化的客户端 API Key"""
+        """Get persisted client API keys"""
         with self._lock:
             return dict(self._client_keys)
 
     def save_client_key(self, instance_id: str, api_key: str) -> None:
-        """持久化客户端 API Key（线程安全）"""
+        """Persist client API key (thread-safe)"""
         with self._lock:
             self._client_keys[instance_id] = api_key
             self._save_file('client_keys.json', self._client_keys)
 
     def remove_client_key(self, instance_id: str) -> bool:
-        """删除持久化的客户端 API Key"""
+        """Remove persisted client API key"""
         with self._lock:
             if instance_id in self._client_keys:
                 del self._client_keys[instance_id]
@@ -302,11 +302,11 @@ class DataStore:
         return False
 
     # ==================== Replica Operations ====================
-    
+
     def replica_store(self, data_id: str, data_type: str, content: Dict) -> bool:
-        """存储副本数据（节点间调用）"""
+        """Store replica data (inter-node calls)"""
         with self._lock:
-            # 规范化：将 data_id 作为内容的 id 字段
+            # Normalize: use data_id as the id field of content
             if 'id' not in content:
                 content['id'] = data_id
 
@@ -329,38 +329,38 @@ class DataStore:
                 self._save_file('skills.json', self._skills)
                 return True
         return False
-    
+
     def replica_get(self, data_id: str) -> Optional[Dict]:
-        """获取副本数据"""
+        """Get replica data"""
         with self._lock:
-            # 在思想中查找
+            # Search in thoughts
             for t in self._thoughts:
                 if t.get('id') == data_id:
                     return {'data_type': 'thought', 'content': t, 'found': True}
-            # 在技能中查找
+            # Search in skills
             for s in self._skills:
                 if s.get('id') == data_id:
                     return {'data_type': 'skill', 'content': s, 'found': True}
         return None
-    
+
     def get_all_for_sync(self) -> Dict:
-        """获取全部数据供节点同步"""
+        """Get all data for node synchronization"""
         with self._lock:
             return {
                 'thoughts': list(self._thoughts),
                 'skills': list(self._skills),
             }
-    
+
     # ==================== Context Manager ====================
-    
+
     def acquire_lock(self):
-        """获取锁（用于需要长时间在锁内操作的场景）"""
+        """Acquire lock (for scenarios requiring long operations inside the lock)"""
         return self._lock
-    
+
     def __enter__(self):
         self._lock.acquire()
         return self
-    
+
     def __exit__(self, exc_type, exc_val, exc_tb):
         self._lock.release()
         return False
