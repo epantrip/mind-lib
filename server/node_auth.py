@@ -93,8 +93,11 @@ class NodeAuth:
                 }), 401
 
             # 获取原始请求内容用于验签
+            # request.full_path 永远带 '?' 后缀，即使无查询参数
+            # 为与客户端 sign() 行为一致，用 request.path + query_string 重建
             method = request.method
-            path = request.path
+            qs = request.query_string.decode()
+            path = request.path + (('?' + qs) if qs else '')
             body = request.get_data()
 
             if not self.verify(signature, method, path, body):
