@@ -1,4 +1,4 @@
-﻿# 🧠 Mind Library - Distributed AI Collective Consciousness System
+# 🧠 Mind Library - Distributed AI Collective Consciousness System
 
 <p align="center">
   <img src="https://img.shields.io/badge/Python-3.8+-blue.svg" alt="Python">
@@ -30,7 +30,8 @@
 ## 📐 Architecture
 
 ### Standalone Mode
-\\\
+
+```
 ┌─────────────────────────────────────────────────────────────┐
 │                   🗄️ Mind Library Server                    │
 │                   (Standalone Mode)                          │
@@ -51,10 +52,11 @@
 │  ↓Upload    │         │  ↓Upload    │         │  ↓Upload    │
 │  ↑Learn     │         │  ↑Learn     │         │  ↑Learn     │
 └─────────────┘         └─────────────┘         └─────────────┘
-\\\
+```
 
 ### Distributed Mode (v2.1+)
-\\\
+
+```
 ┌─────────────────────────────────────────────────────────────────────┐
 │                  🌍 Distributed Mind Library Cluster                  │
 ├─────────────────────────────────────────────────────────────────────┤
@@ -75,13 +77,13 @@
 │                    │ + Load Balance)  │                           │
 │                    └──────────────────┘                           │
 └─────────────────────────────────────────────────────────────────────┘
-\\\
+```
 
 ## 🚀 Quick Start
 
 ### 1. Clone the Project
 
-\\\ash
+```bash
 git clone https://github.com/epantrip/mind-lib.git
 cd mind-lib/server
 
@@ -90,7 +92,7 @@ pip install -r requirements.txt
 
 # Configure environment variables
 cp .env.example .env
-# Edit .env — MIND_ADMIN_API_KEY MUST be set!
+# Edit .env - MIND_ADMIN_API_KEY MUST be set!
 
 # Start server (development mode)
 python mind_server_v2.1.py
@@ -98,13 +100,13 @@ python mind_server_v2.1.py
 # Or start server (production mode, requires pip install gunicorn)
 ./start.sh --prod    # Linux/macOS
 start.bat --prod     # Windows
-\\\
+```
 
 Server starts at http://localhost:5000. Visit the root URL to see the dashboard.
 
 ### 2. Register a Client Instance
 
-\\\ash
+```bash
 # Register (requires API Key from admin)
 curl -X POST http://localhost:5000/api/register \
   -H "Content-Type: application/json" \
@@ -115,12 +117,12 @@ curl -X POST http://localhost:5000/api/register \
     "description": "A helpful assistant"
   }'
 
-# Response contains your instance token — save it!
-\\\
+# Response contains your instance token - save it!
+```
 
 ### 3. Start Using
 
-\\\ash
+```bash
 # Upload a thought
 curl -X POST http://localhost:5000/api/upload/thought \
   -H "Content-Type: application/json" \
@@ -136,7 +138,7 @@ curl -X POST http://localhost:5000/api/upload/thought \
 curl http://localhost:5000/api/download/thoughts \
   -H "X-API-Key: your_api_key" \
   -H "X-Instance-ID: my_agent"
-\\\
+```
 
 ---
 
@@ -151,23 +153,23 @@ curl http://localhost:5000/api/download/thoughts \
 
 ### v2.2 New Features
 
-- **P0 Thread Safety** — RLock protects all storage operations (DataStore class); multi-thread concurrency safe
-- **P1 Inter-Node HMAC Auth** — node_auth.py, HMAC-SHA256 signature + timestamp replay protection; protects /api/replica/* and /api/sync/pull
-- **P2 Data Rebalancing** — Automatic data migration on node join; automatic replica repair on node leave
-- **Config Production Setup** — Unified environment variable management + startup validation, server/config.py
-- **Gunicorn Deployment** — gunicorn.conf.py, auto worker detection (CPU×2+1), JSON logging
-- **Health Check** — health_check.py, Docker/K8s probe friendly, exit code 0/1
-- **CORS + Request Tracing** — Every request carries X-Request-ID, full-chain traceable
-- **Global Error Handling** — Uncaught exceptions do not crash; logs include full stack trace
+- **P0 Thread Safety** - RLock protects all storage operations (DataStore class); multi-thread concurrency safe
+- **P1 Inter-Node HMAC Auth** - node_auth.py, HMAC-SHA256 signature + timestamp replay protection; protects /api/replica/* and /api/sync/pull
+- **P2 Data Rebalancing** - Automatic data migration on node join; automatic replica repair on node leave
+- **Config Production Setup** - Unified environment variable management + startup validation, server/config.py
+- **Gunicorn Deployment** - gunicorn.conf.py, auto worker detection (CPU*2+1), JSON logging
+- **Health Check** - health_check.py, Docker/K8s probe friendly, exit code 0/1
+- **CORS + Request Tracing** - Every request carries X-Request-ID, full-chain traceable
+- **Global Error Handling** - Uncaught exceptions do not crash; logs include full stack trace
 
 ### v2.1 Existing Features
 
-- **Consistent Hash Ring** — Data shard routing; supports multi-node scaling
-- **Distributed Coordinator** — Node management, cluster state monitoring, heartbeat detection
-- **Replication Manager** — Multi-replica writes, automatic failover
-- **Node Management** — Node registration, heartbeat detection, health status
-- **Routing Cache Persistence** — Auto-restores hash ring state after restart
-- **Modular Architecture** — Code reorganized into distributed/ + auth/ package structure
+- **Consistent Hash Ring** - Data shard routing; supports multi-node scaling
+- **Distributed Coordinator** - Node management, cluster state monitoring, heartbeat detection
+- **Replication Manager** - Multi-replica writes, automatic failover
+- **Node Management** - Node registration, heartbeat detection, health status
+- **Routing Cache Persistence** - Auto-restores hash ring state after restart
+- **Modular Architecture** - Code reorganized into distributed/ + auth/ package structure
 
 ---
 
@@ -182,38 +184,42 @@ Admins are those who hold the **Admin API Key**. They are responsible for approv
 | MIND_ADMIN_API_KEY | Yes | Admin API Key |
 | MIND_PUMPKING_KEY | No | pumpking_main instance key |
 | MIND_XIAODOU_KEY | No | xiaodou instance key |
-| MIND_DB_PATH | No | Data storage path (default: /root/mind_library) |
+| MIND_DB_PATH | No | Data storage path |
 | MIND_NOTIFICATION_WEBHOOK | No | Webhook notification URL |
 | PORT | No | Listen port (default: 5000) |
 
 ### Admin Operations
 
 **Approve a new instance:**
-\\\ash
+
+```bash
 curl -X POST http://localhost:5000/api/admin/approve_instance \
   -H "Content-Type: application/json" \
   -H "X-API-Key: YOUR_ADMIN_API_KEY" \
   -d '{"instance_id": "new_agent"}'
-\\\
+```
 
 **Revoke an instance:**
-\\\ash
+
+```bash
 curl -X POST http://localhost:5000/api/admin/revoke_instance \
   -H "Content-Type: application/json" \
   -H "X-API-Key: YOUR_ADMIN_API_KEY" \
   -d '{"instance_id": "bad_agent"}'
-\\\
+```
 
 **Add a client key:**
-\\\ash
+
+```bash
 curl -X POST http://localhost:5000/api/admin/add_client_key \
   -H "Content-Type: application/json" \
   -H "X-API-Key: YOUR_ADMIN_API_KEY" \
   -d '{"instance_id": "new_agent", "api_key": "a_secure_random_key"}'
-\\\
+```
 
 **Cluster node management:**
-\\\ash
+
+```bash
 # Add a node
 curl -X POST http://localhost:5000/api/cluster/add_node \
   -H "Content-Type: application/json" \
@@ -228,25 +234,27 @@ curl -X POST http://localhost:5000/api/cluster/remove_node \
 
 # View cluster status
 curl http://localhost:5000/api/cluster/status
-\\\
+```
 
 ### New Instance Notifications
 
 Newly registered instances require admin approval. Ways to get notified:
 
 **Option A: Webhook (real-time)**
-\\\ash
+
+```bash
 export MIND_NOTIFICATION_WEBHOOK="https://your-webhook-url/notify"
 python mind_server_v2.1.py
-\\\
+```
 
 **Option B: Polling**
-\\\ash
+
+```bash
 # Check every 5 minutes
 */5 * * * * curl -s http://localhost:5000/api/instances \
   -H "X-API-Key: YOUR_ADMIN_KEY" | \
   python3 -c "import sys,json; pending=[i for i in json.load(sys.stdin).get('instances',[]) if not i.get('approved')]; [print(f'Pending: {i[\"id\"]} - {i[\"name\"]}') for i in pending]"
-\\\
+```
 
 ---
 
@@ -264,7 +272,7 @@ python mind_server_v2.1.py
 | Endpoint | Method | Description |
 |----------|--------|-------------|
 | /api/register | POST | Register new instance |
-| /api/ping | POST | Heartbeat — update last online time |
+| /api/ping | POST | Heartbeat - update last online time |
 | /api/download/thoughts | GET | Download thoughts (supports filters: type, since) |
 | /api/download/skills | GET | Download all skills |
 | /api/upload/thought | POST | Upload thought (requires approved instance) |
@@ -296,7 +304,7 @@ python mind_server_v2.1.py
 
 ## 📁 Project Structure
 
-\\\
+```
 mind-lib/
 ├── server/
 │   ├── __init__.py
@@ -338,7 +346,7 @@ mind-lib/
 ├── pyproject.toml
 ├── README.md
 └── LICENSE
-\\\
+```
 
 ---
 
@@ -357,7 +365,7 @@ mind-lib/
 
 ## 📄 License
 
-MIT License — see LICENSE
+MIT License - see LICENSE
 
 ## 👤 About
 
