@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """
-🎃 Pumpking 思想同步客户端 - 安全加固版
-支持：API Key认证 + Token验证 + 请求重试
+🎃 Pumpking Mind Sync Client - Secure Version
+Supports: API Key authentication + Token validation + Request retry
 """
 import os
 import json
@@ -9,19 +9,19 @@ import requests
 from datetime import datetime
 from pathlib import Path
 
-# ==================== 配置 ====================
-# 服务器地址
+# ==================== Configuration ====================
+# Server URL
 SERVER_URL = os.environ.get('MIND_SERVER_URL', 'http://132.226.117.183:5000')
 
-# 实例ID和名称
+# Instance ID and name
 INSTANCE_ID = os.environ.get('MIND_INSTANCE_ID', 'pumpking_main')
-INSTANCE_NAME = os.environ.get('MIND_INSTANCE_NAME', 'Pumpking(主服务器)')
+INSTANCE_NAME = os.environ.get('MIND_INSTANCE_NAME', 'Pumpking(Main Server)')
 
-# API Keys（从环境变量读取，或使用默认值）
+# API Keys (read from env vars, or use defaults)
 API_KEY = os.environ.get('MIND_API_KEY', 'pumpking_secret_abc123')
-INSTANCE_TOKEN = None  # 注册后获取
+INSTANCE_TOKEN = None  # Obtained after registration
 
-# 详细日志
+# Verbose logging
 VERBOSE = os.environ.get('MIND_VERBOSE', 'true').lower() == 'true'
 
 class MindSyncClient:
@@ -34,11 +34,11 @@ class MindSyncClient:
         self.last_sync_file = os.path.expanduser("~/.pumpking_last_sync")
         
     def _request(self, method, endpoint, **kwargs):
-        """带认证的请求"""
+        """Authenticated request"""
         url = f"{self.server_url}{endpoint}"
         headers = kwargs.get('headers', {})
         
-        # 添加认证头
+        # Add auth headers
         headers['X-API-Key'] = self.api_key
         headers['X-Instance-ID'] = self.instance_id
         if self.token:
@@ -55,12 +55,12 @@ class MindSyncClient:
             resp.raise_for_status()
             return resp.json()
         except requests.exceptions.RequestException as e:
-            print(f"❌ 请求失败: {e}")
+            print(f"❌ Request failed: {e}")
             return {"status": "error", "error": str(e)}
     
     def register(self):
-        """注册实例并获取Token"""
-        print(f"📝 注册实例: {self.instance_id} ({self.instance_name})")
+        """Register instance and obtain token"""
+        print(f"📝 Registering instance: {self.instance_id} ({self.instance_name})")
         
         data = {
             "instance_id": self.instance_id,
@@ -72,21 +72,21 @@ class MindSyncClient:
         
         if result.get('status') == 'ok':
             self.token = result.get('token')
-            print(f"✅ 注册成功! Token: {self.token[:16]}...")
+            print(f"✅ Registration success! Token: {self.token[:16]}...")
             self._save_token()
             return True
         else:
-            print(f"❌ 注册失败: {result.get('error')}")
+            print(f"❌ Registration failed: {result.get('error')}")
             return False
     
     def _save_token(self):
-        """保存Token到本地"""
+        """Save token to local file"""
         token_file = os.path.expanduser("~/.pumpking_token")
         with open(token_file, 'w') as f:
             f.write(self.token or "")
     
     def _load_token(self):
-        """从本地加载Token"""
+        """Load token from local file"""
         token_file = os.path.expanduser("~/.pumpking_token")
         if os.path.exists(token_file):
             with open(token_file, 'r') as f:
@@ -95,14 +95,14 @@ class MindSyncClient:
         return False
     
     def ping(self):
-        """发送心跳"""
+        """Send heartbeat"""
         data = {"instance_id": self.instance_id}
         return self._request('POST', '/api/ping', json=data)
     
     def upload_thought(self, title, content, thought_type='general'):
-        """上传思想"""
+        """Upload a thought"""
         if not self.token:
-            print("❌ 未注册Token，请先调用 register()")
+            print("❌ Token not registered, call register() first")
             return None
         
         data = {
@@ -115,9 +115,9 @@ class MindSyncClient:
         return self._request('POST', '/api/upload/thought', json=data)
     
     def upload_skill(self, skill_name, content, description=''):
-        """上传技能"""
+        """Upload a skill"""
         if not self.token:
-            print("❌ 未注册Token，请先调用 register()")
+            print("❌ Token not registered, call register() first")
             return None
         
         data = {
@@ -130,7 +130,7 @@ class MindSyncClient:
         return self._request('POST', '/api/upload/skill', json=data)
     
     def download_thoughts(self, thought_type=None, since=None):
-        """下载思想"""
+        """Download thoughts"""
         params = {}
         if thought_type:
             params['type'] = thought_type
@@ -140,19 +140,19 @@ class MindSyncClient:
         return self._request('GET', '/api/download/thoughts', params=params)
     
     def download_skills(self):
-        """下载技能"""
+        """Download skills"""
         return self._request('GET', '/api/download/skills')
     
     def list_instances(self):
-        """列出实例"""
+        """List instances"""
         return self._request('GET', '/api/instances')
     
     def stats(self):
-        """获取统计"""
+        """Get statistics"""
         return self._request('GET', '/api/stats')
     
     def health_check(self):
-        """健康检查"""
+        """Health check"""
         try:
             resp = requests.get(f"{self.server_url}/api/health", timeout=5)
             return resp.json()
@@ -161,12 +161,12 @@ class MindSyncClient:
 
 
 def main():
-    """测试客户端"""
+    """Test client"""
     print("=" * 50)
-    print("🎃 Pumpking 思想库客户端 - 安全加固版")
+    print("🎃 Pumpking Mind Library Client - Secure Version")
     print("=" * 50)
     
-    # 创建客户端
+    # Create client
     client = MindSyncClient(
         server_url=SERVER_URL,
         instance_id=INSTANCE_ID,
@@ -174,37 +174,37 @@ def main():
         api_key=API_KEY
     )
     
-    # 健康检查
-    print("\n1️⃣ 健康检查...")
+    # Health check
+    print("\n1️⃣ Health check...")
     health = client.health_check()
     print(f"   {health}")
     
-    # 尝试加载Token
+    # Try to load token
     if client._load_token():
-        print(f"\n2️⃣ 加载已有Token: {client.token[:16]}...")
+        print(f"\n2️⃣ Loaded existing token: {client.token[:16]}...")
     else:
-        # 注册新实例
-        print("\n2️⃣ 注册新实例...")
+        # Register new instance
+        print("\n2️⃣ Registering new instance...")
         client.register()
     
-    # 发送心跳
-    print("\n3️⃣ 发送心跳...")
+    # Send heartbeat
+    print("\n3️⃣ Sending heartbeat...")
     result = client.ping()
     print(f"   {result}")
     
-    # 获取统计
-    print("\n4️⃣ 获取统计...")
+    # Get statistics
+    print("\n4️⃣ Getting statistics...")
     stats = client.stats()
-    print(f"   思想: {stats.get('thoughts', 'N/A')}, 技能: {stats.get('skills', 'N/A')}, 实例: {stats.get('instances', 'N/A')}")
+    print(f"   Thoughts: {stats.get('thoughts', 'N/A')}, Skills: {stats.get('skills', 'N/A')}, Instances: {stats.get('instances', 'N/A')}")
     
-    # 获取实例列表
-    print("\n5️⃣ 获取实例列表...")
+    # Get instance list
+    print("\n5️⃣ Getting instance list...")
     instances = client.list_instances()
-    print(f"   共 {instances.get('count', 0)} 个实例")
+    print(f"   Total {instances.get('count', 0)} instances")
     for inst in instances.get('instances', [])[:3]:
         print(f"   - {inst.get('name')}: {inst.get('last_seen', '')[:19]}")
     
-    print("\n✅ 测试完成!")
+    print("\n✅ Test complete!")
 
 
 if __name__ == '__main__':

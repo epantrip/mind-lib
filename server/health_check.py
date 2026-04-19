@@ -1,22 +1,19 @@
 #!/usr/bin/env python3
 """
-健康检查脚本 — 用于 Docker/K8s liveness/readiness 探针
-用法:
+Health Check Script - for Docker/K8s liveness/readiness probes
+
+Usage:
     python health_check.py [--url http://localhost:5000] [--timeout 5]
-退出码:
-    0 = 健康
-    1 = 不健康（服务异常或网络错误）
+
+Exit codes:
+    0 = healthy
+    1 = unhealthy (service error or network error)
 """
-import os
-import sys
-import argparse
-import urllib.request
-import urllib.error
-import json
+import os, sys, argparse, urllib.request, urllib.error, json
 
 
 def check_health(url: str, timeout: int) -> bool:
-    """检查服务健康状态"""
+    """Check service health status"""
     try:
         req = urllib.request.Request(
             f"{url}/api/health",
@@ -35,14 +32,14 @@ def check_health(url: str, timeout: int) -> bool:
 
 
 def main():
-    parser = argparse.ArgumentParser(description="Mind Library 健康检查")
+    parser = argparse.ArgumentParser(description="Mind Library Health Check")
     parser.add_argument(
         "--url", default=os.environ.get("MIND_SERVER_URL", "http://localhost:5000"),
-        help="服务地址"
+        help="Service URL"
     )
     parser.add_argument(
         "--timeout", type=int, default=5,
-        help="超时秒数"
+        help="Timeout in seconds"
     )
     args = parser.parse_args()
 

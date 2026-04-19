@@ -1,23 +1,23 @@
 #!/usr/bin/env python3
 """
-Mind Library 基础测试
+Mind Library Basic Tests
 
-测试路由：
-- /api/health (公开)
-- /api/stats (管理员认证)
-- /api/register (公开，自动生成 API Key)
-- /api/ping (公开)
-- /api/upload/thought (客户端认证+审批)
-- /api/download/thoughts (客户端认证)
-- /api/upload/skill (客户端认证+审批)
-- /api/download/skills (客户端认证)
-- /api/instances (管理员认证)
-- /api/admin/add_client_key (管理员认证)
-- /api/admin/remove_client_key (管理员认证)
-- /api/admin/list_client_keys (管理员认证)
-- /api/admin/approve_instance (管理员认证)
-- /api/cluster/nodes (管理员认证)
-- /api/cluster/status (管理员认证)
+Test Routes:
+- /api/health (public)
+- /api/stats (admin auth)
+- /api/register (public, auto-generates API Key)
+- /api/ping (public)
+- /api/upload/thought (client auth + approval)
+- /api/download/thoughts (client auth)
+- /api/upload/skill (client auth + approval)
+- /api/download/skills (client auth)
+- /api/instances (admin auth)
+- /api/admin/add_client_key (admin auth)
+- /api/admin/remove_client_key (admin auth)
+- /api/admin/list_client_keys (admin auth)
+- /api/admin/approve_instance (admin auth)
+- /api/cluster/nodes (admin auth)
+- /api/cluster/status (admin auth)
 """
 import pytest
 import requests
@@ -25,15 +25,15 @@ import time
 import os
 import uuid
 
-# 测试配置
+# Test configuration
 SERVER_URL = os.environ.get("TEST_SERVER_URL", "http://localhost:5000")
 
-# 动态生成唯一 instance_id，避免测试间冲突
+# Dynamically generate unique instance_id to avoid test conflicts
 TEST_INSTANCE = f"test_{uuid.uuid4().hex[:8]}"
 
 
 class TestHealth:
-    """健康检查（公开端点）"""
+    """Health check (public endpoint)"""
 
     def test_health(self):
         resp = requests.get(f"{SERVER_URL}/api/health")
@@ -44,22 +44,22 @@ class TestHealth:
 
 
 class TestStatsAuth:
-    """/api/stats 鉴权测试"""
+    """/api/stats auth tests"""
 
     def test_stats_without_auth_returns_401(self):
-        """无认证访问 stats → 401"""
+        """Accessing stats without auth → 401"""
         resp = requests.get(f"{SERVER_URL}/api/stats")
         assert resp.status_code == 401
 
     def test_stats_with_wrong_key_returns_401(self):
-        """错误 admin key → 401"""
+        """Wrong admin key → 401"""
         resp = requests.get(f"{SERVER_URL}/api/stats", headers={
             "X-API-Key": "wrong-key"
         })
         assert resp.status_code == 401
 
     def test_stats_with_admin_key_returns_200(self, admin_key):
-        """正确 admin key → 200"""
+        """Correct admin key → 200"""
         if not admin_key:
             pytest.skip("TEST_ADMIN_KEY not set")
         resp = requests.get(f"{SERVER_URL}/api/stats", headers={
@@ -73,22 +73,22 @@ class TestStatsAuth:
 
 
 class TestRegister:
-    """实例注册（自动生成 API Key）"""
+    """Instance registration (auto-generates API Key)"""
 
     _instance_id = None
     _api_key = None
 
     @pytest.fixture(autouse=True)
     def _register_instance(self):
-        """注册测试实例，返回 api_key"""
-        # 每次运行用新的 instance_id
+        """Register test instance, return api_key"""
+        # Use a new instance_id each run
         iid = f"test_{uuid.uuid4().hex[:8]}"
         TestRegister._instance_id = iid
 
         resp = requests.post(f"{SERVER_URL}/api/register", json={
             "instance_id": iid,
-            "instance_name": "测试实例",
-            "description": "自动化测试"
+            "instance_name": "Test Instance",
+            "description": "Automated test"
         })
         assert resp.status_code == 200
         data = resp.json()
@@ -97,23 +97,23 @@ class TestRegister:
         TestRegister._api_key = data["api_key"]
 
     def test_register_returns_api_key(self):
-        """注册返回 api_key"""
+        """Registration returns api_key"""
         assert TestRegister._api_key is not None
         assert len(TestRegister._api_key) == 32
 
     def test_register_duplicate_returns_409(self):
-        """重复注册 → 409"""
+        """Duplicate registration → 409"""
         resp = requests.post(f"{SERVER_URL}/api/register", json={
             "instance_id": TestRegister._instance_id,
         })
         assert resp.status_code == 409
 
     def test_upload_thought_before_approval_returns_403(self):
-        """未审批的上传 → 403"""
+        """Upload before approval → 403"""
         resp = requests.post(f"{SERVER_URL}/api/upload/thought", json={
             "type": "insight",
-            "title": "测试",
-            "content": "未审批测试"
+            "title": "Test",
+            "content": "Pre-approval test"
         }, headers={
             "X-API-Key": TestRegister._api_key,
             "X-Instance-ID": TestRegister._instance_id
@@ -122,10 +122,10 @@ class TestRegister:
 
 
 class TestAdminKeyManagement:
-    """管理员 Key 管理接口"""
+    """Admin Key Management API"""
 
     def test_add_client_key(self, admin_key):
-        """管理员添加客户端 Key"""
+        """Admin adds client key"""
         if not admin_key:
             pytest.skip("TEST_ADMIN_KEY not set")
         resp = requests.post(f"{SERVER_URL}/api/admin/add_client_key", json={
@@ -135,7 +135,7 @@ class TestAdminKeyManagement:
         assert resp.status_code == 200
 
     def test_list_client_keys(self, admin_key):
-        """列出客户端 Key"""
+        """List client keys"""
         if not admin_key:
             pytest.skip("TEST_ADMIN_KEY not set")
         resp = requests.get(f"{SERVER_URL}/api/admin/list_client_keys",
@@ -143,12 +143,12 @@ class TestAdminKeyManagement:
         assert resp.status_code == 200
         data = resp.json()
         assert "client_keys" in data
-        # 密钥值应该被遮蔽
+        # Key values should be masked
         if "admin_test_instance" in data["client_keys"]:
             assert data["client_keys"]["admin_test_instance"] == "***"
 
     def test_remove_client_key(self, admin_key):
-        """移除客户端 Key"""
+        """Remove client key"""
         if not admin_key:
             pytest.skip("TEST_ADMIN_KEY not set")
         resp = requests.post(f"{SERVER_URL}/api/admin/remove_client_key", json={
@@ -157,7 +157,7 @@ class TestAdminKeyManagement:
         assert resp.status_code == 200
 
     def test_remove_client_key_without_auth(self):
-        """无认证移除 → 401"""
+        """Remove without auth → 401"""
         resp = requests.post(f"{SERVER_URL}/api/admin/remove_client_key", json={
             "instance_id": "admin_test_instance"
         })
@@ -165,21 +165,21 @@ class TestAdminKeyManagement:
 
 
 class TestDownloadAuth:
-    """下载接口认证测试"""
+    """Download API auth tests"""
 
     def test_download_thoughts_without_auth_returns_401(self):
-        """无认证下载 → 401"""
+        """Download without auth → 401"""
         resp = requests.get(f"{SERVER_URL}/api/download/thoughts")
         assert resp.status_code == 401
 
     def test_download_skills_without_auth_returns_401(self):
-        """无认证下载技能 → 401"""
+        """Download skills without auth → 401"""
         resp = requests.get(f"{SERVER_URL}/api/download/skills")
         assert resp.status_code == 401
 
 
 class TestClusterAuth:
-    """集群接口认证测试"""
+    """Cluster API auth tests"""
 
     def test_cluster_nodes_without_auth_returns_401(self):
         resp = requests.get(f"{SERVER_URL}/api/cluster/nodes")
@@ -194,7 +194,7 @@ class TestClusterAuth:
 
 @pytest.fixture(scope="session")
 def admin_key():
-    """从环境变量或 .env 文件读取管理员 Key"""
+    """Read admin key from env var or .env file"""
     key = os.environ.get("TEST_ADMIN_KEY", "")
     if not key:
         env_path = os.path.join(os.path.dirname(__file__), '..', 'server', '.env')

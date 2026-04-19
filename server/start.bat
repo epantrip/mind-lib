@@ -1,36 +1,36 @@
 @echo off
-:: Mind Library — Windows 启动脚本
-:: 用法: start.bat
-:: 生产环境建议使用 gunicorn: gunicorn -c gunicorn.conf.py mind_server_v2.1:app
+:: Mind Library ? Windows Startup Script
+:: Usage: start.bat
+:: Production: gunicorn -c gunicorn.conf.py mind_server_v2.1:app
 
 echo ================================================
-echo Mind Library v2.1.1  - 启动中
+echo Mind Library v2.2.0 - Starting...
 echo ================================================
 echo.
 
-:: 检查 Python
+:: Check Python
 python --version >nul 2>&1
 if errorlevel 1 (
-    echo [错误] 未找到 Python，请先安装 Python 3.8+
+    echo [ERROR] Python not found. Please install Python 3.8+ first.
     pause
     exit /b 1
 )
 
-:: 检查依赖
+:: Check dependencies
 pip show flask >nul 2>&1
 if errorlevel 1 (
-    echo [警告] Flask 未安装，正在安装依赖...
+    echo [WARNING] Flask not installed, installing dependencies...
     pip install -r requirements.txt
 )
 
-:: 检查 .env 文件
+:: Check .env file
 if not exist .env (
-    echo [警告] .env 文件不存在，已创建模板 .env.example
-    echo [警告] 请复制 .env.example 为 .env 并填写实际值！
+    echo [WARNING] .env not found. Template created as .env.example
+    echo [WARNING] Please copy .env.example to .env and fill in the values!
     echo.
 )
 
-:: 设置环境变量（从 .env 加载）
+:: Load environment variables from .env
 if exist .env (
     for /f "usebackq tokens=1,* delims=" %%a in (.env) do (
         echo %%a | findstr /i "^[A-Z]" >nul
@@ -42,17 +42,18 @@ if exist .env (
     )
 )
 
-:: 生产模式：使用 Gunicorn
+:: Production mode: use Gunicorn
 if "%1"=="--prod" (
     where gunicorn >nul 2>&1
     if errorlevel 1 (
-        echo [错误] 未安装 gunicorn，执行: pip install gunicorn
+        echo [ERROR] gunicorn not installed. Run: pip install gunicorn
         pause
         exit /b 1
     )
-    echo [生产模式] 使用 Gunicorn 启动
+    echo [PROD] Starting with Gunicorn
     gunicorn -c gunicorn.conf.py mind_server_v2.1:app
 ) else (
-    echo [开发模式] 使用 Flask 内置服务器启动
+    echo [DEV] Starting with Flask built-in server
     python mind_server_v2.1.py
 )
+

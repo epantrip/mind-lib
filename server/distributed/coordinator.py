@@ -1,12 +1,12 @@
-"""
+﻿"""
 Mind Library - Distributed Coordinator (P2: Rebalance + Repair)
 
-增量改动：
-1. _data_ownership: Dict[str, Set[str]] — data_id → 持有该数据的节点集合
-2. _record_ownership(data_id, nodes): 每次写入后记录
-3. _trigger_rebalance(node_id): 新节点从旧节点拉取应负责的数据
-4. _repair_after_node_leave(node_id): 离开节点的数据重新复制到健康节点
-5. /api/replica/migrate 端点：节点间数据迁移
+Incremental changes:
+1. _data_ownership: Dict[str, Set[str]] — data_id -> set of nodes holding this data
+2. _record_ownership(data_id, nodes): records after each write
+3. _trigger_rebalance(node_id): new node pulls data it should own from old nodes
+4. _repair_after_node_leave(node_id): data from leaving node is replicated to healthy nodes
+5. /api/replica/migrate endpoint: inter-node data migration
 """
 
 import hashlib
@@ -47,12 +47,12 @@ class Operation:
 
 class DistributedCoordinator:
     """
-    分布式协调者
+    Distributed Coordinator
 
-    P2 新增：
-    - 数据所有权追踪（_data_ownership）
-    - 节点加入时的数据再平衡
-    - 节点离开后的副本修复
+    P2 additions:
+    - Data ownership tracking (_data_ownership)
+    - Data rebalancing on node join
+    - Replica repair after node leave
     """
 
     def __init__(
@@ -76,15 +76,15 @@ class DistributedCoordinator:
             replication_factor=replication_factor,
         )
 
-        # P2: 数据所有权追踪
-        # key = data_id, value = 持有该数据的节点集合
+        # P2: Data ownership tracking
+        # key = data_id, value = set of nodes holding this data
         self._data_ownership: Dict[str, Set[str]] = {}
 
-        # 操作记录
+        # Operation records
         self.operations: List[Operation] = []
         self.max_operations = 10000
 
-        # 监控指标
+        # Monitoring metrics
         self.metrics = {
             "total_requests": 0,
             "successful_requests": 0,
@@ -92,7 +92,7 @@ class DistributedCoordinator:
             "avg_latency_ms": 0,
             "cache_hits": 0,
             "cache_misses": 0,
-            # P2 新增
+            # P2 additions
             "rebalance_triggered": 0,
             "rebalance_success": 0,
             "repair_triggered": 0,
@@ -105,27 +105,27 @@ class DistributedCoordinator:
     # ==================== Node Management ====================
 
     def add_node(self, node_id: str, host: str, port: int) -> bool:
-        """添加存储节点"""
+        """Add a storage node"""
         self.node_manager.register_node(node_id, host, port)
         node = Node(node_id, host, port)
         self.hash_ring.add_node(node)
 
-        logger.info(f"🎃 节点添加成功: {node_id} @ {host}:{port}")
+        logger.info(f"[Coordinator] Node added: {node_id} @ {host}:{port}")
 
-        # P2: 触发数据再平衡
+        # P2: Trigger data rebalancing
         if config.CLUSTER_CONFIG["auto_rebalance"]:
             self._trigger_rebalance(node_id)
 
         return True
 
     def remove_node(self, node_id: str) -> bool:
-        """移除存储节点"""
+        """Remove a storage node"""
         self.node_manager.unregister_node(node_id)
         self.hash_ring.remove_node(node_id)
 
-        logger.info(f"🎃 节点移除: {node_id}")
+        logger.info(f"[Coordinator] Node removed: {node_id}")
 
-        # P2: 修复离开节点的副本
+        # P2: Repair replicas from leaving node
         self._repair_after_node_leave(node_id)
 
         return True
@@ -136,7 +136,7 @@ class DistributedCoordinator:
         storage_used_gb: Optional[float] = None,
         status: str = "online",
     ) -> bool:
-        """节点心跳"""
+        """Node heartbeat"""
         success = self.node_manager.heartbeat(node_id, storage_used_gb)
 
         if success:
@@ -151,15 +151,15 @@ class DistributedCoordinator:
 
         return success
 
-    # ==================== 路由核心 ====================
+    # ==================== Routing Core ====================
 
     def _get_data_id(self, data_type: str, key: str) -> str:
-        """生成数据唯一ID"""
+        """Generate unique data ID"""
         raw = f"{data_type}:{key}"
         return hashlib.sha256(raw.encode()).hexdigest()[:16]
 
     def get_storage_nodes(self, data_id: str) -> tuple:
-        """返回 (primary_node_id, [replica_node_ids])"""
+        """Return (primary_node_id, [replica_node_ids])"""
         cached = self.routing_cache.get(data_id)
         if cached:
             return cached
@@ -178,7 +178,7 @@ class DistributedCoordinator:
         data_id: str,
         preferred_node: Optional[str] = None,
     ) -> Optional[str]:
-        """获取最佳读取节点"""
+        """Get the best node for reading"""
         primary, replicas = self.get_storage_nodes(data_id)
 
         candidates = []
@@ -213,7 +213,7 @@ class DistributedCoordinator:
         request_load = min(node.request_count / 1000 * 10, 50)
         return storage_load + request_load
 
-    # ==================== 数据操作 ====================
+    # ==================== Data Operations ====================
 
     def upload_thought(
         self,
@@ -221,7 +221,7 @@ class DistributedCoordinator:
         content: Dict,
         user_id: Optional[str] = None,
     ) -> Dict:
-        """上传思想"""
+        """Upload a thought"""
         op_id = f"upload_{int(time.time() * 1000)}"
         data_id = self._get_data_id("thought", thought_id)
 
@@ -242,7 +242,7 @@ class DistributedCoordinator:
             node_urls=node_urls,
         )
 
-        # P2: 记录所有权
+        # P2: Record ownership
         if success:
             self._record_ownership(data_id, [primary] + replicas)
 
@@ -270,7 +270,7 @@ class DistributedCoordinator:
         }
 
     def download_thought(self, thought_id: str) -> Optional[Dict]:
-        """下载思想"""
+        """Download a thought"""
         op_id = f"download_{int(time.time() * 1000)}"
         data_id = self._get_data_id("thought", thought_id)
 
@@ -309,7 +309,7 @@ class DistributedCoordinator:
         skill_id: str,
         content: Dict,
     ) -> Dict:
-        """上传技能"""
+        """Upload a skill"""
         op_id = f"upload_skill_{int(time.time() * 1000)}"
         data_id = self._get_data_id("skill", skill_id)
 
@@ -339,10 +339,10 @@ class DistributedCoordinator:
             "replica_nodes": replicas,
         }
 
-    # ==================== 集群管理 ====================
+    # ==================== Cluster Management ====================
 
     def sync_thought(self, thought: Dict) -> bool:
-        """同步思想到分布式节点（供主服务器调用）"""
+        """Sync thought to distributed nodes (called by main server)"""
         thought_id = thought.get("id", "")
         if not thought_id:
             return False
@@ -370,7 +370,7 @@ class DistributedCoordinator:
         return success
 
     def _get_node_urls(self) -> Dict[str, str]:
-        """获取所有节点的URL映射"""
+        """Get URL mapping for all nodes"""
         return {
             node.node_id: node.url
             for node in self.node_manager.get_online_nodes()
@@ -381,69 +381,64 @@ class DistributedCoordinator:
         if len(self.operations) > self.max_operations:
             self.operations = self.operations[-self.max_operations:]
 
-    # ==================== P2: 数据所有权追踪 ====================
+    # ==================== P2: Data Ownership Tracking ====================
 
     def _record_ownership(self, data_id: str, nodes: List[str]) -> None:
-        """记录 data_id 由哪些节点持有"""
+        """Record which nodes hold a data_id"""
         self._data_ownership[data_id] = set(nodes)
 
     def _get_data_owned_by_node(self, node_id: str) -> List[str]:
-        """获取指定节点持有的所有 data_id"""
+        """Get all data_ids held by a specific node"""
         return [
             data_id
             for data_id, owners in self._data_ownership.items()
             if node_id in owners
         ]
 
-    # ==================== P2: 数据再平衡 ====================
+    # ==================== P2: Data Rebalancing ====================
 
     def _trigger_rebalance(self, new_node_id: str) -> Dict[str, Any]:
         """
-        新节点加入时，触发数据再平衡
+        Trigger data rebalancing when a new node joins
 
-        策略：懒迁移（lazy migration）
-        - 新节点主动拉取（pull）自己应该负责的数据
-        - 旧节点保留数据直到被告知可删除
-        - 新数据直接写入新节点
+        Strategy: Lazy Migration
+        - New node actively pulls (pull) data it should own
+        - Old nodes retain data until told to delete
+        - New data is written directly to the new node
 
-        流程：
-        1. 获取所有在线旧节点
-        2. 让新节点从各旧节点拉取自己应负责的数据
-        3. 旧节点收到 /api/replica/migrate 请求后推送数据
+        Flow:
+        1. Get all online old nodes
+        2. New node pulls data it should own from each old node
+        3. Old nodes return data via /api/replica/migrate endpoint
         """
         self.metrics["rebalance_triggered"] += 1
-        logger.info(f"🎃 触发数据再平衡: 新节点={new_node_id}")
+        logger.info(f"[Rebalance] Triggered: new_node={new_node_id}")
 
         new_node = self.node_manager.get_node(new_node_id)
         if not new_node or not new_node.is_healthy():
-            logger.warning(f"新节点 {new_node_id} 未就绪，跳过再平衡")
+            logger.warning(f"[Rebalance] New node {new_node_id} not ready, skipping")
             return {"success": False, "error": "Node not healthy"}
 
-        # 在线旧节点
+        # Online old nodes
         old_nodes = [
             n for n in self.node_manager.get_online_nodes()
             if n.node_id != new_node_id
         ]
 
         if not old_nodes:
-            logger.info("无旧节点，跳过再平衡")
+            logger.info("[Rebalance] No old nodes, skipping")
             return {"success": True, "migrated": 0}
 
-        # 获取新节点的 URL
+        # Get new node URL
         new_node_url = new_node.url
 
-        # 让新节点依次从各旧节点拉取数据
-        # 旧节点通过 /api/replica/migrate 端点返回应迁移的数据
+        # New node pulls data from each old node
+        # Old nodes return data via /api/replica/migrate endpoint
         total_migrated = 0
         session = self.replication_manager._get_session()
 
         for old_node in old_nodes:
             try:
-                # 请求旧节点返回"应该属于 new_node 的数据"列表
-                # 这里用 GET /api/replica/migrate?target={new_node_id}
-                # 旧节点的 migrate 端点会：
-                #   1. 计算每个本地 data_id 现在应该属于哪些节点
-                #   2. 如果 new_node 在目标节点中，返回该数据
                 migrate_path = f"/api/replica/migrate?target={new_node_id}"
                 resp = session.get(
                     url=old_node.url,
@@ -455,7 +450,7 @@ class DistributedCoordinator:
                     migrate_data = resp.json()
                     items = migrate_data.get("items", [])
                     for item in items:
-                        # 新节点写入数据（replica_store）
+                        # New node writes data (replica_store)
                         store_resp = session.post(
                             url=new_node_url,
                             path="/api/replica/store",
@@ -467,7 +462,7 @@ class DistributedCoordinator:
                             timeout=30,
                         )
                         if store_resp.status_code == 200:
-                            # 记录所有权
+                            # Record ownership
                             self._record_ownership(
                                 item["data_id"],
                                 [new_node_id]
@@ -475,22 +470,21 @@ class DistributedCoordinator:
                             total_migrated += 1
 
                     logger.info(
-                        f"  {old_node.node_id} -> {new_node_id}: "
-                        f"迁移 {len(items)} 条数据"
+                        f"[Rebalance] {old_node.node_id} -> {new_node_id}: "
+                        f"migrated {len(items)} items"
                     )
                 elif resp.status_code == 404:
-                    # 旧节点不支持 migrate 端点，忽略
                     logger.debug(
-                        f"节点 {old_node.node_id} 不支持 /api/replica/migrate"
+                        f"[Rebalance] Node {old_node.node_id} does not support /api/replica/migrate"
                     )
             except Exception as e:
                 logger.warning(
-                    f"  从 {old_node.node_id} 拉取失败: {e}"
+                    f"[Rebalance] Pull from {old_node.node_id} failed: {e}"
                 )
 
         logger.info(
-            f"✅ 再平衡完成: 新节点={new_node_id}, "
-            f"迁移 {total_migrated} 条数据"
+            f"[Rebalance] Complete: new_node={new_node_id}, "
+            f"migrated={total_migrated} items"
         )
         self.metrics["rebalance_success"] += 1
 
@@ -500,46 +494,46 @@ class DistributedCoordinator:
             "migrated": total_migrated,
         }
 
-    # ==================== P2: 副本修复 ====================
+    # ==================== P2: Replica Repair ====================
 
     def _repair_after_node_leave(self, failed_node_id: str) -> Dict[str, Any]:
         """
-        节点离开后，修复副本（确保每条数据有足够的副本数）
+        After a node leaves, repair replicas (ensure every data has sufficient replica count)
 
-        流程：
-        1. 找出该节点持有的所有 data_id
-        2. 对每条数据，检查当前副本数
-        3. 副本数不足时，从存活节点重新复制
+        Flow:
+        1. Find all data_ids held by this node
+        2. For each data, check current replica count
+        3. If replica count insufficient, replicate from surviving nodes
         """
         self.metrics["repair_triggered"] += 1
-        logger.info(f"🎃 修复副本: 离开节点={failed_node_id}")
+        logger.info(f"[Repair] Triggered: failed_node={failed_node_id}")
 
-        # 找出该节点负责的数据
+        # Find data held by this node
         data_ids = self._get_data_owned_by_node(failed_node_id)
-        logger.info(f"  节点 {failed_node_id} 持有 {len(data_ids)} 条数据需要修复")
+        logger.info(f"[Repair] Node {failed_node_id} held {len(data_ids)} items to repair")
 
         if not data_ids:
-            logger.info("  无数据需要修复")
+            logger.info("[Repair] No data to repair")
             return {"success": True, "repaired": 0}
 
-        # 在线健康节点
+        # Online healthy nodes
         healthy_nodes = self.node_manager.get_healthy_nodes()
         if not healthy_nodes:
-            logger.error("  无健康节点，修复失败")
+            logger.error("[Repair] No healthy nodes, repair failed")
             return {"success": False, "error": "No healthy nodes"}
 
         repaired = 0
         node_urls = self._get_node_urls()
 
         for data_id in data_ids:
-            # 重新计算该 data_id 现在应该存储在哪些节点
+            # Recalculate which nodes this data_id should be stored on
             primary, replicas = self.get_storage_nodes(data_id)
             target_nodes = [primary] + replicas if primary else replicas
 
             if not target_nodes:
                 continue
 
-            # 找出该数据目前缺失的节点
+            # Find nodes currently missing this data
             current_owners = self._data_ownership.get(data_id, set())
             missing_nodes = [
                 n for n in target_nodes
@@ -547,10 +541,10 @@ class DistributedCoordinator:
             ]
 
             if not missing_nodes:
-                # 副本已足够
+                # Replicas already sufficient
                 continue
 
-            # 从现有持有者读取数据
+            # Read data from existing holder
             source_node = None
             for owner in current_owners:
                 if owner != failed_node_id and owner in node_urls:
@@ -558,10 +552,10 @@ class DistributedCoordinator:
                     break
 
             if not source_node:
-                logger.warning(f"  无法找到 {data_id} 的数据源")
+                logger.warning(f"[Repair] Cannot find data source for {data_id}")
                 continue
 
-            # 读取数据
+            # Read data
             content = self.replication_manager.read_from_replica(
                 data_id=data_id,
                 preferred_node=source_node,
@@ -569,14 +563,14 @@ class DistributedCoordinator:
             )
 
             if not content:
-                logger.warning(f"  无法读取 {data_id} 的数据内容")
+                logger.warning(f"[Repair] Cannot read content for {data_id}")
                 continue
 
-            # 确定 data_type
+            # Determine data_type
             data_type = content.get("data_type", "thought")
             data_content = content.get("content", {})
 
-            # 重新复制到缺失节点
+            # Replicate to missing nodes
             success = self.replication_manager.replicate_to_nodes(
                 data_id=data_id,
                 data_type=data_type,
@@ -587,19 +581,19 @@ class DistributedCoordinator:
             )
 
             if success:
-                # 更新所有权记录
+                # Update ownership record
                 new_owners = current_owners | set(missing_nodes)
                 new_owners.discard(failed_node_id)
                 self._record_ownership(data_id, list(new_owners))
                 repaired += 1
-                logger.debug(f"  ✅ 修复: {data_id} -> {missing_nodes}")
+                logger.debug(f"[Repair] OK: {data_id} -> {missing_nodes}")
             else:
-                logger.warning(f"  ❌ 修复失败: {data_id}")
+                logger.warning(f"[Repair] FAILED: {data_id}")
 
-        logger.info(f"✅ 副本修复完成: 修复 {repaired}/{len(data_ids)} 条数据")
+        logger.info(f"[Repair] Complete: repaired {repaired}/{len(data_ids)} items")
         self.metrics["repair_success"] += 1
 
-        # 更新所有权记录：移除离开节点
+        # Update ownership: remove leaving node
         for data_id in self._data_ownership:
             self._data_ownership[data_id].discard(failed_node_id)
 
@@ -611,7 +605,7 @@ class DistributedCoordinator:
         }
 
     def get_cluster_status(self) -> Dict:
-        """获取集群状态"""
+        """Get cluster status"""
         node_stats = self.node_manager.get_cluster_stats()
         ring_stats = self.hash_ring.get_stats()
 
@@ -630,7 +624,7 @@ class DistributedCoordinator:
         }
 
     def get_routing_info(self, data_type: str, key: str) -> Dict:
-        """获取路由信息（调试用）"""
+        """Get routing info (for debugging)"""
         data_id = self._get_data_id(data_type, key)
         primary, replicas = self.get_storage_nodes(data_id)
 
@@ -643,7 +637,7 @@ class DistributedCoordinator:
         }
 
 
-# 测试
+# Tests
 if __name__ == "__main__":
     coord = DistributedCoordinator(node_id="coordinator_001")
 
@@ -651,26 +645,26 @@ if __name__ == "__main__":
     coord.add_node("node_002", "192.168.1.2", 5001)
     coord.add_node("node_003", "192.168.1.3", 5001)
 
-    print("🎃 分布式协调者测试（同步版本）")
+    print("[Coordinator] Test run")
     print("=" * 50)
 
     test_thoughts = [
-        ("thought_001", "我的第一个想法"),
-        ("thought_002", "关于投资的思考"),
-        ("thought_003", "今天的市场分析"),
+        ("thought_001", "My first thought"),
+        ("thought_002", "Investment thinking"),
+        ("thought_003", "Market analysis"),
     ]
 
     for thought_id, _ in test_thoughts:
         info = coord.get_routing_info("thought", thought_id)
         print(f"\n{thought_id}:")
         print(f"  Data ID: {info['data_id']}")
-        print(f"  主节点: {info['primary_node']}")
-        print(f"  副本: {info['replica_nodes']}")
+        print(f"  Primary: {info['primary_node']}")
+        print(f"  Replicas: {info['replica_nodes']}")
 
-    print("\n📊 集群状态:")
+    print("\n[Cluster Status]:")
     status = coord.get_cluster_status()
-    print(f"  节点数: {status['nodes']['total_nodes']}")
-    print(f"  在线: {status['nodes']['online_nodes']}")
-    print(f"  存储: {status['nodes']['used_storage_gb']:.1f}GB / {status['nodes']['total_storage_gb']:.1f}GB")
+    print(f"  Nodes: {status['nodes']['total_nodes']}")
+    print(f"  Online: {status['nodes']['online_nodes']}")
+    print(f"  Storage: {status['nodes']['used_storage_gb']:.1f}GB / {status['nodes']['total_storage_gb']:.1f}GB")
 
-    print("\n✅ 同步版本就绪，可在 Flask 中直接调用")
+    print("\n[Ready for use in Flask]")
