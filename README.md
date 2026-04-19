@@ -3,7 +3,7 @@
 <p align="center">
   <img src="https://img.shields.io/badge/Python-3.8+-blue.svg" alt="Python">
   <img src="https://img.shields.io/badge/License-MIT-green.svg" alt="License">
-  <img src="https://img.shields.io/badge/Version-2.1-orange.svg" alt="Version">
+  <img src="https://img.shields.io/badge/Version-2.2-orange.svg" alt="Version">
   <img src="https://img.shields.io/badge/Security-Authorization-red.svg" alt="Security">
 </p>
 
@@ -16,6 +16,10 @@
 - **分布式架构** - 支持单机模式和分布式集群模式，无限扩展
 - **多副本冗余** - 数据自动复制到多个节点，高可用性
 - **自动故障转移** - 节点故障时自动切换到健康副本
+- **线程安全** - RLock 保护所有存储操作，支持多线程并发（v2.2 P0）
+- **节点间 HMAC 签名认证** - 所有节点 API 调用使用 HMAC-SHA256 签名，防伪造（v2.2 P1）
+- **数据再平衡** - 节点加入/离开时自动迁移数据，副本数自动修复（v2.2 P2）
+- **生产配置** - Config 类统一管理环境变量，Gunicorn 部署，health check（v2.2）
 - **API Key 安全认证** - 管理员/客户端角色分离
 - **实例审批机制** - 新实例需管理员审批
 - **速率限制** - 防止滥用 (60 req/min)
@@ -77,20 +81,24 @@
 
 ```bash
 git clone https://github.com/epantrip/mind-lib.git
-cd mind-lib
+cd mind-lib/server
 
-pip install flask werkzeug requests
+# 安装依赖
+pip install -r requirements.txt
 
 # 配置环境变量
 cp .env.example .env
-# 编辑 .env - 设置你的 ADMIN_API_KEY 和 CLIENT_KEYS！
+# 编辑 .env - 必须设置 MIND_ADMIN_API_KEY！
 
-# 启动服务器 (v2.1 分布式版)
-cd server
+# 启动服务器（开发模式）
 python mind_server_v2.1.py
+
+# 或启动服务器（生产模式，需先 pip install gunicorn）
+./start.sh --prod    # Linux/macOS
+start.bat --prod     # Windows
 ```
 
-服务器启动在 `http://localhost:5000`，访问根URL查看管理面板。
+服务器启动在 `http://localhost:5000`，访问根URL查看仪表盘。
 
 ### 2. 注册客户端实例
 
@@ -136,9 +144,21 @@ curl http://localhost:5000/api/download/thoughts \
 |------|------|------|
 | v1.0 | `mind_server.py` | 初始版本：基础思想/技能同步 |
 | v2.0 | `mind_server_secure.py` | 安全加固：API Key认证、实例审批、速率限制 |
-| **v2.1** | `mind_server_v2.1.py` | **分布式版**：一致性哈希、多副本冗余、集群管理 |
+| v2.1 | `mind_server_v2.1.py` | 分布式版：一致性哈希、多副本冗余、集群管理 |
+| **v2.2** | `mind_server_v2.1.py` | **生产就绪版**：线程安全、节点 HMAC 认证、数据再平衡、Gunicorn 部署 |
 
-### v2.1 新增功能
+### v2.2 新增功能
+
+- **P0 线程安全** — RLock 保护所有存储操作（DataStore 类），多线程并发安全
+- **P1 节点间 HMAC 认证** — `node_auth.py`，HMAC-SHA256 签名 + 时间戳防重放，保护 `/api/replica/*` 和 `/api/sync/pull`
+- **P2 数据再平衡** — 节点加入时自动迁移数据，节点离开时自动修复副本数
+- **Config 生产配置** — 统一环境变量管理 + 启动校验，`server/config.py`
+- **Gunicorn 部署** — `gunicorn.conf.py`，自动 workers 检测、JSON 日志
+- **健康检查** — `health_check.py`，Docker/K8s 探针友好，退出码 0/1
+- **CORS + 请求追踪** — 每个请求带 `X-Request-ID`，全链路可追踪
+- **全局错误兜底** — 未捕获异常不崩溃，日志含完整堆栈
+
+### v2.1 已有功能
 
 - **一致性哈希环** — 数据分片路由，支持多节点扩展
 - **分布式协调器** — 节点管理、集群状态监控
@@ -267,9 +287,10 @@ python mind_server_v2.1.py
 | `/api/cluster/status` | GET | 集群详细状态 |
 | `/api/cluster/add_node` | POST | 添加集群节点 (需管理员) |
 | `/api/cluster/remove_node` | POST | 移除集群节点 (需管理员) |
-| `/api/replica/store` | POST | 存储副本数据 (节点间) |
-| `/api/replica/get/<id>` | GET | 获取副本数据 (节点间) |
-| `/api/sync/pull` | POST | 节点间数据同步拉取 |
+| `/api/replica/store` | POST | 存储副本数据 (节点间，HMAC 认证) |
+| `/api/replica/get/<id>` | GET | 获取副本数据 (节点间，HMAC 认证) |
+| `/api/replica/migrate` | GET | 查询应迁移给目标节点的数据 (HMAC 认证，v2.2 P2) |
+| `/api/sync/pull` | POST | 节点间数据同步拉取 (HMAC 认证) |
 
 ---
 
@@ -281,9 +302,17 @@ mind-lib/
 │   ├── __init__.py
 │   ├── mind_server.py               # v1.0 原始服务器 (无认证)
 │   ├── mind_server_secure.py        # v2.0 安全版 (API Key认证)
-│   ├── mind_server_v2.1.py          # v2.1 分布式版 (集群+副本)
-│   ├── mind_server_v2.1.1.py        # v2.1.1 分布式版+管理面板
+│   ├── mind_server_v2.1.py          # v2.2 分布式安全版 (当前主服务器)
+│   ├── mind_server_v2.1.1.py        # v2.1.1 管理面板版 (旧版)
+│   ├── config.py                    # v2.2 生产配置类
+│   ├── data_store.py                # v2.2 线程安全数据存储层 (P0)
+│   ├── node_auth.py                 # v2.2 节点间 HMAC 认证 (P1)
+│   ├── gunicorn.conf.py             # v2.2 Gunicorn 生产配置
+│   ├── health_check.py              # v2.2 健康检查脚本 (Docker/K8s)
+│   ├── start.bat / start.sh         # v2.2 跨平台启动脚本
+│   ├── .env.example                 # v2.2 环境变量模板
 │   ├── requirements.txt
+│   ├── DEPLOY.md                    # v2.2 详细部署指南
 │   ├── auth/                        # 认证模块
 │   │   ├── __init__.py
 │   │   └── api_key.py
@@ -306,8 +335,6 @@ mind-lib/
 │   ├── DEPLOY_GUIDE.md
 │   └── API_REFERENCE.md
 ├── examples/
-├── .env.example
-├── .gitignore
 ├── pyproject.toml
 ├── README.md
 └── LICENSE
@@ -319,6 +346,7 @@ mind-lib/
 
 | 版本 | 日期 | 变更 |
 |------|------|------|
+| **v2.2.0** | 2026-04-19 | 🛡️ **生产就绪**：线程安全 DataStore (P0)、节点 HMAC 签名认证 (P1)、数据再平衡/副本修复 (P2)、Config 生产配置、Gunicorn 部署、CORS+请求追踪、全局异常兜底 |
 | v2.1.0 | 2026-04-17 | 🌐 分布式集群：一致性哈希、多副本冗余、节点管理、路由缓存持久化、模块化重构 |
 | v2.0.1 | 2026-04-15 | 📡 Webhook 通知、新实例注册通知 |
 | v2.0.0 | 2026-04-15 | 🔒 安全加固：API Key认证、实例审批、速率限制 |

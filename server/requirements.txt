@@ -1,4 +1,16 @@
-# Mind Library Server
+# Mind Library Server — 依赖列表
+# 基础
 flask>=2.0.0
 requests>=2.25.0
 werkzeug>=2.0.0
+
+# 生产部署
+gunicorn>=20.1.0
+gevent>=21.0.0        # Gunicorn 异步 worker（生产推荐）
+
+# 监控与可观测性（可选，按需启用）
+# prometheus-client>=0.11.0  # 指标暴露
+# flask-healthz>=1.0.0       # 健康检查端点
+
+# 安全增强（可选）
+# python-dotenv>=0.19.0      # .env 文件加载（当前用 os.environ，直接装 flask 即可）

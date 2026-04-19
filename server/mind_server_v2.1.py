@@ -1,5 +1,5 @@
 """
-Mind Library 分布式安全版 - 主服务器 v2.1.0
+Mind Library 分布式安全版 - 主服务器 v2.2.0 (Thread-Safe)
 
 特性：
 - 分布式集群支持（一致性哈希 + 多副本）
@@ -7,6 +7,7 @@ Mind Library 分布式安全版 - 主服务器 v2.1.0
 - 实例审批机制
 - 速率限制
 - Webhook 通知
+- 线程安全（P0）
 """
 
 import os
@@ -14,8 +15,9 @@ import json
 import logging
 import hashlib
 import time
+import uuid
 from datetime import datetime
-from flask import Flask, request, jsonify, render_template_string
+from flask import Flask, request, jsonify, render_template_string, make_response
 
 # 导入分布式模块（相对导入）
 from distributed import (
@@ -28,8 +30,17 @@ from distributed import (
 # 导入认证模块
 from auth.api_key import create_auth, APIKeyAuth
 
-# 配置日志
-logging.basicConfig(level=logging.INFO)
+# 导入线程安全数据存储层
+from data_store import DataStore
+
+# 导入节点间认证（P1: 分布式节点 API 签名认证）
+from node_auth import get_node_auth
+
+# 导入生产配置
+from config import Config
+
+# 配置日志（生产优先）
+Config.setup_logging()
 logger = logging.getLogger(__name__)
 
 # Flask 应用
@@ -37,116 +48,85 @@ app = Flask(__name__)
 app.config['JSON_SORT_KEYS'] = False
 
 # ============== 初始化 ==============
+# 启动时校验配置
+Config.validate()
+
 # 存储路径
-DB_PATH = os.environ.get('MIND_DB_PATH', '/root/mind_library')
+DB_PATH = Config.DB_PATH
 os.makedirs(DB_PATH, exist_ok=True)
 
-# 认证
-auth = create_auth()
+# 认证（持久化存储 + 环境变量加载客户端密钥）
+# store 必须在 auth 之前初始化，因为 create_auth 需要 store.get_client_keys()
+store = DataStore(DB_PATH)
+auth = create_auth(persisted_keys=store.get_client_keys())
+auth.set_store(store)  # 注入 DataStore，供 require_client(require_approved=True) 使用
 
-# 分布式协调者
-coordinator = DistributedCoordinator(node_id='mind_hub_primary')
+# 分布式协调者（参数由 distributed.config.CLUSTER_CONFIG 提供）
+# 但先用 Config 的 env 覆盖，以支持运行时配置
+from distributed.config import CLUSTER_CONFIG
+CLUSTER_CONFIG['virtual_nodes'] = Config.VIRTUAL_NODES
+CLUSTER_CONFIG['heartbeat_interval'] = Config.HEARTBEAT_INTERVAL
+CLUSTER_CONFIG['failure_threshold'] = Config.FAILURE_THRESHOLD
+CLUSTER_CONFIG['storage_limit_gb'] = Config.STORAGE_LIMIT // 1000  # 思想数→GB 近似
 
-# 本地数据存储（主节点数据）
-thoughts = []
-skills = []
-instances = {}
+coordinator = DistributedCoordinator(
+    node_id=Config.NODE_ID,
+    replication_factor=Config.REPLICA_FACTOR,
+)
 
+# 节点间认证（P1）
+node_auth = get_node_auth()
 
-# ============== 辅助函数 ==============
-def load_data(filename, default=None):
-    """加载数据文件（兼容v2.0目录式存储）"""
-    if default is None:
-        default = []
-    path = os.path.join(DB_PATH, filename)
-    # instances: 支持从目录加载单个json文件（v2.0兼容）
-    if filename == 'instances.json':
-        dir_path = os.path.join(DB_PATH, 'instances')
-        if os.path.isdir(dir_path):
-            result = {}
-            for fname in os.listdir(dir_path):
-                if fname.endswith('.json'):
-                    try:
-                        with open(os.path.join(dir_path, fname), 'r', encoding='utf-8') as f:
-                            data = json.load(f)
-                            iid = data.get('id') or data.get('instance_id') or fname.replace('.json', '')
-                            result[iid] = data
-                    except Exception:
-                        pass
-            return result
-    # thoughts/skills: 支持从目录加载（v2.0兼容）
-    if filename in ('thoughts.json', 'skills.json') and not os.path.exists(path):
-        dir_name = filename.replace('.json', '')
-        dir_path = os.path.join(DB_PATH, dir_name)
-        if os.path.isdir(dir_path):
-            result = []
-            for fname in sorted(os.listdir(dir_path)):
-                if fname.endswith('.json'):
-                    try:
-                        with open(os.path.join(dir_path, fname), 'r', encoding='utf-8') as f:
-                            result.append(json.load(f))
-                    except Exception:
-                        pass
-            return result
-    if os.path.exists(path):
-        try:
-            with open(path, 'r', encoding='utf-8') as f:
-                return json.load(f)
-        except Exception as e:
-            logger.warning(f"加载 {filename} 失败: {e}")
-    return default
+# Webhook（从 Config 读取）
+webhook_url = Config.WEBHOOK_URL
 
 
-def save_data(filename, data):
-    """保存数据文件（兼容v2.0目录式存储）"""
-    # instances: 保存到目录下单独文件（v2.0兼容）
-    if filename == 'instances.json' and isinstance(data, dict):
-        dir_path = os.path.join(DB_PATH, 'instances')
-        os.makedirs(dir_path, exist_ok=True)
-        for iid, inst_data in data.items():
-            try:
-                with open(os.path.join(dir_path, f'{iid}.json'), 'w', encoding='utf-8') as f:
-                    json.dump(inst_data, f, ensure_ascii=False, indent=2)
-            except Exception as e:
-                logger.error(f"保存实例 {iid} 失败: {e}")
-        return
-    # thoughts/skills: 保存到目录下单独文件（v2.0兼容）
-    if filename in ('thoughts.json', 'skills.json') and isinstance(data, list):
-        dir_name = filename.replace('.json', '')
-        dir_path = os.path.join(DB_PATH, dir_name)
-        os.makedirs(dir_path, exist_ok=True)
-        for item in data:
-            item_id = item.get('id') or item.get('instance_id', '')
-            ts = item.get('timestamp', item.get('created_at', ''))
-            if item_id and ts:
-                fname = f"{item_id}_{ts.replace('-','').replace(':','').replace('.','')}.json"
-            elif item_id:
-                fname = f"{item_id}.json"
-            else:
-                fname = f"{int(time.time())}.json"
-            try:
-                with open(os.path.join(dir_path, fname), 'w', encoding='utf-8') as f:
-                    json.dump(item, f, ensure_ascii=False, indent=2)
-            except Exception as e:
-                logger.error(f"保存到 {fname} 失败: {e}")
-        return
-    path = os.path.join(DB_PATH, filename)
-    try:
-        with open(path, 'w', encoding='utf-8') as f:
-            json.dump(data, f, ensure_ascii=False, indent=2)
-    except Exception as e:
-        logger.error(f"保存 {filename} 失败: {e}")
+# ============== CORS + 请求追踪中间件 ==============
+
+@app.before_request
+def add_cors_and_request_id():
+    """每个请求添加 CORS 头和请求 ID，方便追踪。"""
+    # 生成请求 ID
+    request_id = request.headers.get('X-Request-ID') or str(uuid.uuid4())[:8]
+    request._request_id = request_id  # 存到 request 对象上
+
+    # CORS 响应头
+    if Config.CORS_ORIGINS:
+        origins = [o.strip() for o in Config.CORS_ORIGINS.split(',')]
+        origin = request.headers.get('Origin', '')
+        if origin in origins:
+            resp = make_response()
+            resp.headers['Access-Control-Allow-Origin'] = origin
+            resp.headers['Access-Control-Allow-Headers'] = (
+                'Content-Type, X-API-Key, X-Instance-ID, X-Node-Signature, X-Node-ID, X-Request-ID'
+            )
+            resp.headers['Access-Control-Allow-Methods'] = 'GET, POST, PUT, DELETE, OPTIONS'
+            resp.headers['Access-Control-Max-Age'] = '3600'
+            # Flask 会自动处理 OPTIONS 预检，但在这里先设置头
+            if request.method == 'OPTIONS':
+                resp.status_code = 204
+                return resp
+
+    # 记录请求（带请求 ID）
+    logger.info(f"[{request_id}] {request.method} {request.path}")
 
 
-# 初始化数据
-thoughts = load_data('thoughts.json', [])
-skills = load_data('skills.json', [])
-instances = load_data('instances.json', {})
+@app.after_request
+def add_response_headers(response):
+    """每个响应添加安全头和请求 ID。"""
+    request_id = getattr(request, '_request_id', None)
+    if request_id:
+        response.headers['X-Request-ID'] = request_id
+    # 安全头
+    response.headers['X-Content-Type-Options'] = 'nosniff'
+    response.headers['X-Frame-Options'] = 'DENY'
+    response.headers['X-XSS-Protection'] = '1; mode=block'
+    response.headers['Strict-Transport-Security'] = 'max-age=31536000; includeSubDomains'
+    return response
 
 
 def notify_webhook(payload):
-    """发送 Webhook 通知"""
-    webhook_url = os.environ.get('MIND_NOTIFICATION_WEBHOOK')
+    """发送 Webhook 通知（网络 I/O，在锁外调用）"""
     if not webhook_url:
         return
     
@@ -163,18 +143,15 @@ def notify_webhook(payload):
 @app.route('/')
 def index():
     """Web 仪表盘"""
-    stats = {
-        'version': '2.1.0',
-        'thoughts': len(thoughts),
-        'skills': len(skills),
-        'instances': len([i for i in instances.values() if i.get('approved')]),
-        'pending': len([i for i in instances.values() if not i.get('approved')]),
+    stats = store.get_stats()
+    stats.update({
+        'version': '2.2.0',
         'coordinator_status': coordinator.status.value,
         'cluster_nodes': len(coordinator.node_manager.nodes),
-    }
+    })
     
     html = '''<!DOCTYPE html>
-<html><head><meta charset="utf-8"><title>Mind Library v2.1.0</title>
+<html><head><meta charset="utf-8"><title>Mind Library v2.2.0</title>
 <style>
 body{font-family:Arial,sans-serif;max-width:800px;margin:0 auto;padding:20px;background:#f5f5f5}
 h1{color:#333}.card{background:white;border-radius:8px;padding:20px;margin:10px 0;box-shadow:0 2px 4px rgba(0,0,0,0.1)}
@@ -182,14 +159,14 @@ h1{color:#333}.card{background:white;border-radius:8px;padding:20px;margin:10px 
 .status{color:#2196F3;font-weight:bold}.status-standby{color:#FF9800}
 </style></head>
 <body>
-<h1>Mind Library v2.1.0</h1>
+<h1>Mind Library v2.2.0</h1>
 <div class="card">
 <h2>系统状态</h2>
 <p><span class="label">版本:</span> <span class="stat">{{stats.version}}</span></p>
 <p><span class="label">思想数量:</span> <span class="stat">{{stats.thoughts}}</span></p>
 <p><span class="label">技能数量:</span> <span class="stat">{{stats.skills}}</span></p>
-<p><span class="label">已批准实例:</span> <span class="stat">{{stats.instances}}</span></p>
-<p><span class="label">待审批:</span> <span class="stat">{{stats.pending}}</span></p>
+<p><span class="label">已批准实例:</span> <span class="stat">{{stats.approved_instances}}</span></p>
+<p><span class="label">待审批:</span> <span class="stat">{{stats.pending_instances}}</span></p>
 </div>
 <div class="card">
 <h2>分布式集群</h2>
@@ -211,37 +188,34 @@ def health():
     """健康检查"""
     return jsonify({
         'status': 'ok',
-        'version': '2.1.0',
+        'version': '2.2.0',
         'distributed': True,
         'secure': True,
+        'thread_safe': True,
         'timestamp': datetime.now().isoformat()
     })
 
 
 @app.route('/api/stats')
+@auth.require_admin
 def stats():
-    """统计信息"""
-    return jsonify({
-        'thoughts': len(thoughts),
-        'skills': len(skills),
-        'instances': {
-            'total': len(instances),
-            'approved': len([i for i in instances.values() if i.get('approved')]),
-            'pending': len([i for i in instances.values() if not i.get('approved')])
-        },
+    """统计信息（需管理员认证）"""
+    stats_data = store.get_stats()
+    stats_data.update({
         'coordinator': {
             'status': coordinator.status.value,
             'nodes': len(coordinator.node_manager.nodes),
             'replication': coordinator.replication_manager.status.value if hasattr(coordinator.replication_manager, 'status') else 'active'
         }
     })
+    return jsonify(stats_data)
 
 
 # ============== 客户端 API ==============
 
 @app.route('/api/register', methods=['POST'])
 def register():
-    """注册新实例"""
+    """注册新实例 — 自动生成 API Key，无需手动配置环境变量"""
     data = request.get_json() or {}
     instance_id = data.get('instance_id')
     instance_name = data.get('instance_name', instance_id)
@@ -250,35 +224,43 @@ def register():
     if not instance_id:
         return jsonify({'error': 'instance_id is required'}), 400
     
-    if instance_id in instances:
+    if store.instance_exists(instance_id):
         return jsonify({'error': 'Instance already exists'}), 409
     
-    # 生成 Token
-    token = hashlib.sha256(f"{instance_id}_{time.time()}".encode()).hexdigest()[:32]
+    # 生成 API Key（同时作为实例 token 和认证凭据）
+    api_key = hashlib.sha256(f"{instance_id}_{time.time()}".encode()).hexdigest()[:32]
     
-    instances[instance_id] = {
+    instance = {
         'id': instance_id,
         'name': instance_name,
         'description': description,
         'approved': False,  # 需要审批
-        'token': token,
+        'token': api_key,
         'created_at': datetime.now().isoformat(),
         'last_seen': time.time()
     }
-    save_data('instances.json', instances)
     
-    # Webhook 通知
+    # 写存储（线程安全）
+    store.add_instance(instance)
+    
+    # 持久化 API Key（auth 内存 + DataStore 磁盘，重启不丢失）
+    auth.add_client_key(instance_id, api_key)
+    store.save_client_key(instance_id, api_key)
+    
+    # Webhook 通知（在锁外）
     notify_webhook({
         'event': 'new_instance_registration',
         'message': f'New instance {instance_id} ({instance_name}) registered and awaiting approval',
         'timestamp': datetime.now().isoformat(),
-        'instance': instances[instance_id]
+        'instance': instance
     })
     
     return jsonify({
         'message': 'Registration submitted, awaiting approval',
         'instance_id': instance_id,
-        'token': token
+        'api_key': api_key,
+        'approved': False,
+        'note': 'Use X-API-Key and X-Instance-ID headers for authenticated requests. Upload requires admin approval.'
     })
 
 
@@ -288,75 +270,44 @@ def ping():
     data = request.get_json() or {}
     instance_id = data.get('instance_id')
     
-    if instance_id and instance_id in instances:
-        instances[instance_id]['last_seen'] = time.time()
-        save_data('instances.json', instances)
+    if instance_id and store.instance_exists(instance_id):
+        store.update_instance(instance_id, {'last_seen': time.time()})
     
     return jsonify({'status': 'ok', 'timestamp': time.time()})
 
 
 @app.route('/api/download/thoughts')
+@auth.require_client
 def download_thoughts():
     """下载思想（需认证）"""
-    api_key = request.headers.get('X-API-Key')
-    instance_id = request.headers.get('X-Instance-ID')
-    
-    if not api_key or not instance_id:
-        return jsonify({'error': 'Missing credentials'}), 401
-    
-    if not auth.verify_client(instance_id, api_key):
-        return jsonify({'error': 'Invalid credentials'}), 401
-    
-    if not auth.check_rate_limit(instance_id):
-        return jsonify({'error': 'Rate limit exceeded'}), 429
+    instance_id = request.instance_id
     
     # 过滤参数
     thought_type = request.args.get('type')
     since = request.args.get('since', '0')
     
-    result = [t for t in thoughts if t.get('created_at', '') > since]
-    if thought_type:
-        result = [t for t in result if t.get('type') == thought_type]
+    # 读存储（线程安全）
+    result = store.get_thoughts(since=since, thought_type=thought_type)
     
     return jsonify({'thoughts': result, 'count': len(result)})
 
 
 @app.route('/api/download/skills')
+@auth.require_client
 def download_skills():
     """下载技能（需认证）"""
-    api_key = request.headers.get('X-API-Key')
-    instance_id = request.headers.get('X-Instance-ID')
     
-    if not api_key or not instance_id:
-        return jsonify({'error': 'Missing credentials'}), 401
-    
-    if not auth.verify_client(instance_id, api_key):
-        return jsonify({'error': 'Invalid credentials'}), 401
-    
-    if not auth.check_rate_limit(instance_id):
-        return jsonify({'error': 'Rate limit exceeded'}), 429
+    # 读存储（线程安全）
+    skills = store.get_skills()
     
     return jsonify({'skills': skills, 'count': len(skills)})
 
 
 @app.route('/api/upload/thought', methods=['POST'])
+@auth.require_client(require_approved=True)
 def upload_thought():
     """上传思想（需认证+审批）"""
-    api_key = request.headers.get('X-API-Key')
-    instance_id = request.headers.get('X-Instance-ID')
-    
-    if not api_key or not instance_id:
-        return jsonify({'error': 'Missing credentials'}), 401
-    
-    if not auth.verify_client(instance_id, api_key):
-        return jsonify({'error': 'Invalid credentials'}), 401
-    
-    if not auth.check_rate_limit(instance_id):
-        return jsonify({'error': 'Rate limit exceeded'}), 429
-    
-    # 检查实例是否已批准
-    if instance_id not in instances or not instances[instance_id].get('approved'):
-        return jsonify({'error': 'Instance not approved'}), 403
+    instance_id = request.instance_id
     
     data = request.get_json() or {}
     
@@ -370,33 +321,20 @@ def upload_thought():
         'tags': data.get('tags', [])
     }
     
-    thoughts.append(thought)
-    save_data('thoughts.json', thoughts)
+    # 写存储（线程安全，锁内完成内存+磁盘）
+    store.add_thought(thought)
     
-    # 分布式：同步到其他节点
+    # 分布式：同步到其他节点（在锁外，网络 I/O）
     coordinator.sync_thought(thought)
     
     return jsonify({'status': 'ok', 'thought_id': thought['id']})
 
 
 @app.route('/api/upload/skill', methods=['POST'])
+@auth.require_client(require_approved=True)
 def upload_skill():
-    """上传技能（需认证）"""
-    api_key = request.headers.get('X-API-Key')
-    instance_id = request.headers.get('X-Instance-ID')
-    
-    if not api_key or not instance_id:
-        return jsonify({'error': 'Missing credentials'}), 401
-    
-    if not auth.verify_client(instance_id, api_key):
-        return jsonify({'error': 'Invalid credentials'}), 401
-    
-    if not auth.check_rate_limit(instance_id):
-        return jsonify({'error': 'Rate limit exceeded'}), 429
-    
-    # 检查实例是否已批准
-    if instance_id not in instances or not instances[instance_id].get('approved'):
-        return jsonify({'error': 'Instance not approved'}), 403
+    """上传技能（需认证+审批）"""
+    instance_id = request.instance_id
     
     data = request.get_json() or {}
     
@@ -411,74 +349,58 @@ def upload_skill():
         'version': data.get('version', '1.0.0')
     }
     
-    # 更新已存在的技能
-    for i, s in enumerate(skills):
-        if s.get('name') == skill['name']:
-            skills[i] = skill
-            break
-    else:
-        skills.append(skill)
-    
-    save_data('skills.json', skills)
+    # 写存储（线程安全）
+    store.add_skill(skill)
     
     return jsonify({'status': 'ok', 'skill_id': skill['id']})
 
 
 @app.route('/api/instances')
+@auth.require_admin
 def list_instances():
     """列出实例（需管理员）"""
-    api_key = request.headers.get('X-API-Key')
-    
-    if not api_key or not auth.verify_admin(api_key):
-        return jsonify({'error': 'Unauthorized'}), 401
-    
+    instances = store.get_instances()
     return jsonify({'instances': list(instances.values())})
 
 
 # ============== 管理员 API ==============
 
 @app.route('/api/admin/approve_instance', methods=['POST'])
+@auth.require_admin
 def approve_instance():
     """批准实例"""
-    api_key = request.headers.get('X-API-Key')
-    if not api_key or not auth.verify_admin(api_key):
-        return jsonify({'error': 'Unauthorized'}), 401
     
     data = request.get_json() or {}
     instance_id = data.get('instance_id')
     
-    if instance_id not in instances:
+    instance = store.get_instance(instance_id)
+    if not instance:
         return jsonify({'error': 'Instance not found'}), 404
     
-    instances[instance_id]['approved'] = True
-    save_data('instances.json', instances)
+    # 更新实例（线程安全）
+    store.update_instance(instance_id, {'approved': True})
     
     return jsonify({'status': 'ok', 'message': f'Instance {instance_id} approved'})
 
 
 @app.route('/api/admin/revoke_instance', methods=['POST'])
+@auth.require_admin
 def revoke_instance():
     """撤销实例"""
-    api_key = request.headers.get('X-API-Key')
-    if not api_key or not auth.verify_admin(api_key):
-        return jsonify({'error': 'Unauthorized'}), 401
     
     data = request.get_json() or {}
     instance_id = data.get('instance_id')
     
-    if instance_id in instances:
-        del instances[instance_id]
-        save_data('instances.json', instances)
+    # 删除实例（线程安全）
+    store.delete_instance(instance_id)
     
     return jsonify({'status': 'ok', 'message': f'Instance {instance_id} revoked'})
 
 
 @app.route('/api/admin/add_client_key', methods=['POST'])
+@auth.require_admin
 def add_client_key():
-    """添加客户端 Key"""
-    api_key = request.headers.get('X-API-Key')
-    if not api_key or not auth.verify_admin(api_key):
-        return jsonify({'error': 'Unauthorized'}), 401
+    """添加/更新客户端 Key（持久化到磁盘，重启不丢失）"""
     
     data = request.get_json() or {}
     instance_id = data.get('instance_id')
@@ -487,21 +409,47 @@ def add_client_key():
     if not instance_id or not new_key:
         return jsonify({'error': 'instance_id and api_key required'}), 400
     
-    # 在认证系统中添加 key
-    auth.client_keys[instance_id] = new_key
+    # auth 内存 + DataStore 磁盘双重持久化
+    auth.add_client_key(instance_id, new_key)
+    store.save_client_key(instance_id, new_key)
     
-    # 更新实例
-    if instance_id in instances:
-        instances[instance_id]['token'] = new_key
-        instances[instance_id]['approved'] = True
-        save_data('instances.json', instances)
+    # 如果实例已存在，同步更新 token 和审批状态
+    if store.instance_exists(instance_id):
+        store.update_instance(instance_id, {'token': new_key, 'approved': True})
     
-    return jsonify({'status': 'ok', 'message': f'API key added for {instance_id}'})
+    logger.info(f"[Admin] 客户端 Key 已添加: instance={instance_id}")
+    return jsonify({'status': 'ok', 'message': f'API key added for {instance_id}', 'approved': True})
+
+
+@app.route('/api/admin/remove_client_key', methods=['POST'])
+@auth.require_admin
+def remove_client_key():
+    """移除客户端 Key（同时从 auth 内存和磁盘删除）"""
+    
+    data = request.get_json() or {}
+    instance_id = data.get('instance_id')
+    
+    if not instance_id:
+        return jsonify({'error': 'instance_id required'}), 400
+    
+    auth.remove_client_key(instance_id)
+    store.remove_client_key(instance_id)
+    
+    logger.info(f"[Admin] 客户端 Key 已移除: instance={instance_id}")
+    return jsonify({'status': 'ok', 'message': f'API key removed for {instance_id}'})
+
+
+@app.route('/api/admin/list_client_keys')
+@auth.require_admin
+def list_client_keys():
+    """列出所有已注册的客户端 Key（不暴露密钥值）"""
+    return jsonify({'client_keys': auth.list_client_keys()})
 
 
 # ============== 分布式集群 API ==============
 
 @app.route('/api/cluster/nodes')
+@auth.require_admin
 def cluster_nodes():
     """列出集群节点"""
     return jsonify({
@@ -519,11 +467,9 @@ def cluster_nodes():
 
 
 @app.route('/api/cluster/add_node', methods=['POST'])
+@auth.require_admin
 def add_cluster_node():
     """添加集群节点（需管理员）"""
-    api_key = request.headers.get('X-API-Key')
-    if not api_key or not auth.verify_admin(api_key):
-        return jsonify({'error': 'Unauthorized'}), 401
     
     data = request.get_json() or {}
     node_id = data.get('node_id')
@@ -539,11 +485,9 @@ def add_cluster_node():
 
 
 @app.route('/api/cluster/remove_node', methods=['POST'])
+@auth.require_admin
 def remove_cluster_node():
     """移除集群节点（需管理员）"""
-    api_key = request.headers.get('X-API-Key')
-    if not api_key or not auth.verify_admin(api_key):
-        return jsonify({'error': 'Unauthorized'}), 401
     
     data = request.get_json() or {}
     node_id = data.get('node_id')
@@ -554,6 +498,7 @@ def remove_cluster_node():
 
 
 @app.route('/api/cluster/status')
+@auth.require_admin
 def cluster_status():
     """获取集群详细状态"""
     return jsonify(coordinator.get_cluster_status())
@@ -562,6 +507,7 @@ def cluster_status():
 # ============== 副本存储 API（分布式节点间通信）=============
 
 @app.route('/api/replica/store', methods=['POST'])
+@node_auth.require_node_auth
 def replica_store():
     """存储副本数据（节点间调用）"""
     data = request.get_json() or {}
@@ -572,99 +518,185 @@ def replica_store():
     if not data_id or not content:
         return jsonify({'error': 'data_id and content required'}), 400
     
-    # 根据类型存储
-    if data_type == 'thought':
-        # 检查是否已存在
-        for i, t in enumerate(thoughts):
-            if t.get('id') == data_id:
-                thoughts[i] = content
-                break
-        else:
-            thoughts.append(content)
-        save_data('thoughts.json', thoughts)
-    elif data_type == 'skill':
-        for i, s in enumerate(skills):
-            if s.get('id') == data_id:
-                skills[i] = content
-                break
-        else:
-            skills.append(content)
-        save_data('skills.json', skills)
+    # 存储副本（线程安全）
+    success = store.replica_store(data_id, data_type, content)
     
     return jsonify({'status': 'ok', 'data_id': data_id})
 
 
 @app.route('/api/replica/get/<data_id>')
+@node_auth.require_node_auth
 def replica_get(data_id):
     """获取副本数据（节点间调用）"""
-    # 在思想中查找
-    for t in thoughts:
-        if t.get('id') == data_id:
-            return jsonify({
-                'data_id': data_id,
-                'data_type': 'thought',
-                'content': t,
-                'found': True
-            })
+    # 读取副本（线程安全）
+    result = store.replica_get(data_id)
     
-    # 在技能中查找
-    for s in skills:
-        if s.get('id') == data_id:
-            return jsonify({
-                'data_id': data_id,
-                'data_type': 'skill',
-                'content': s,
-                'found': True
-            })
+    if result:
+        return jsonify({
+            'data_id': data_id,
+            **result
+        })
     
     return jsonify({'found': False, 'data_id': data_id})
 
 
 @app.route('/api/sync/pull', methods=['POST'])
+@node_auth.require_node_auth
 def sync_pull():
     """节点间数据同步拉取"""
     data = request.get_json() or {}
     source_node = data.get('source_node')
     
-    # 返回本地数据供同步
-    return jsonify({
-        'thoughts': thoughts,
-        'skills': skills,
-        'timestamp': datetime.now().isoformat()
-    })
+    # 获取全部数据（线程安全）
+    sync_data = store.get_all_for_sync()
+    sync_data['timestamp'] = datetime.now().isoformat()
+    
+    return jsonify(sync_data)
+
+
+# ============== P2: 数据迁移 API（分布式节点间通信）==============
+# P1: 需 HMAC 签名认证
+# 用途：节点加入时，旧节点返回应迁移给该节点的数据列表
+
+@app.route('/api/replica/migrate')
+@node_auth.require_node_auth
+def replica_migrate():
+    """
+    返回应迁移给目标节点的数据列表
+
+    Query params:
+        target: 目标节点 ID（迁移数据的新归属节点）
+
+    逻辑：
+    1. 遍历本地存储的所有 data_id
+    2. 对每个 data_id，用 hash_ring 计算现在应该属于哪些节点
+    3. 如果 target 在目标节点列表中，说明这个数据应该迁到 target
+    4. 返回所有应迁移的数据
+    """
+    from distributed.sharding import ConsistentHashRing, Node
+
+    target_node = request.args.get('target', '')
+
+    if not target_node:
+        return jsonify({'error': 'target node ID required'}), 400
+
+    # 获取本地所有数据
+    all_thoughts = store.get_all_thoughts()
+    all_skills = store.get_skills()  # get_skills() 无参数=返回全部
+
+    items = []
+
+    # 计算每个 thought 应该属于哪个节点
+    for thought in all_thoughts:
+        data_id = thought.get('id', '')
+        if not data_id:
+            continue
+        # 用一致性哈希判断该数据现在属于哪些节点
+        # 协调者的 hash_ring 直接算
+        primary = coordinator.hash_ring.get_primary_node(data_id)
+        replicas = coordinator.hash_ring.get_replica_nodes(
+            data_id, coordinator.replication_factor
+        )
+        target_nodes = [primary] + (replicas[1:] if len(replicas) > 1 else [])
+
+        if target_node in target_nodes:
+            items.append({
+                'data_id': data_id,
+                'data_type': 'thought',
+                'content': thought,
+            })
+
+    # 计算每个 skill
+    for skill in all_skills:
+        data_id = skill.get('id', '')
+        if not data_id:
+            continue
+        primary = coordinator.hash_ring.get_primary_node(data_id)
+        replicas = coordinator.hash_ring.get_replica_nodes(
+            data_id, coordinator.replication_factor
+        )
+        target_nodes = [primary] + (replicas[1:] if len(replicas) > 1 else [])
+
+        if target_node in target_nodes:
+            items.append({
+                'data_id': data_id,
+                'data_type': 'skill',
+                'content': skill,
+            })
+
+    logger.info(f"[Migrate] 返回 {len(items)} 条应迁移数据到 {target_node}")
+    return jsonify({'target': target_node, 'items': items})
 
 
 # ============== 错误处理 ==============
 
 @app.errorhandler(404)
 def not_found(e):
-    return jsonify({'error': 'Not found', 'code': 'NOT_FOUND'}), 404
+    request_id = getattr(request, '_request_id', None)
+    resp = jsonify({'error': 'Not found', 'code': 'NOT_FOUND'})
+    if request_id:
+        resp.headers['X-Request-ID'] = request_id
+    return resp, 404
 
 
 @app.errorhandler(500)
 def server_error(e):
-    logger.error(f"Server error: {e}")
-    return jsonify({'error': 'Internal server error', 'code': 'INTERNAL_ERROR'}), 500
+    request_id = getattr(request, '_request_id', None)
+    logger.error(f"[{request_id}] Server error: {e}", exc_info=True)
+    resp = jsonify({
+        'error': 'Internal server error',
+        'code': 'INTERNAL_ERROR',
+        'request_id': request_id
+    })
+    if request_id:
+        resp.headers['X-Request-ID'] = request_id
+    return resp, 500
 
 
 @app.errorhandler(429)
 def rate_limited(e):
-    return jsonify({'error': 'Rate limit exceeded', 'code': 'RATE_LIMIT'}), 429
+    request_id = getattr(request, '_request_id', None)
+    resp = jsonify({'error': 'Rate limit exceeded', 'code': 'RATE_LIMIT'})
+    if request_id:
+        resp.headers['X-Request-ID'] = request_id
+    return resp, 429
+
+
+@app.errorhandler(Exception)
+def unhandled_exception(e):
+    """未捕获的异常兜底，避免服务器崩溃"""
+    request_id = getattr(request, '_request_id', None)
+    logger.exception(f"[{request_id}] Unhandled exception: {e}")
+    resp = jsonify({
+        'error': 'Internal server error',
+        'code': 'UNHANDLED_EXCEPTION',
+        'request_id': request_id
+    })
+    if request_id:
+        resp.headers['X-Request-ID'] = request_id
+    return resp, 500
 
 
 # ============== 启动 ==============
 
 if __name__ == '__main__':
-    port = int(os.environ.get('PORT', 5000))
-    debug = os.environ.get('DEBUG', 'false').lower() == 'true'
-    
     print("=" * 50)
-    print("Mind Library v2.1.0 分布式安全版")
+    print("Mind Library v2.2.0 分布式安全版 (Thread-Safe)")
     print("=" * 50)
-    print(f"存储路径: {DB_PATH}")
-    print(f"监听端口: {port}")
-    print(f"认证: API Key + 实例审批")
-    print(f"分布式: 启用")
+    print(f"节点 ID:       {Config.NODE_ID}")
+    print(f"存储路径:      {Config.DB_PATH}")
+    print(f"持久化目录:    {Config.PERSIST_DIR}")
+    print(f"监听地址:      {Config.HOST}:{Config.PORT}")
+    print(f"日志级别:      {Config.LOG_LEVEL} {'(JSON)' if Config.LOG_JSON else ''}")
+    print(f"CORS 来源:     {Config.CORS_ORIGINS or '(未配置)'}")
+    print(f"DEBUG 模式:    {Config.DEBUG}")
+    print(f"线程安全:      启用 (RLock)")
+    print(f"节点间认证:    {'启用 (HMAC-SHA256)' if Config.NODE_SECRET else '未配置 (MIND_NODE_SECRET 未设置)'}")
+    print(f"管理员认证:    {'已配置' if Config.ADMIN_API_KEY else '未配置!'}")
     print("=" * 50)
-    
-    app.run(host='0.0.0.0', port=port, debug=debug)
+
+    app.run(
+        host=Config.HOST,
+        port=Config.PORT,
+        debug=Config.DEBUG
+    )
