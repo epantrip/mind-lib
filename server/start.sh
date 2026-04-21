@@ -1,4 +1,4 @@
-﻿#!/bin/bash
+#!/bin/bash
 # Mind Library — Linux/macOS Startup Script
 # Usage:
 #   ./start.sh          Development mode (Flask built-in server)

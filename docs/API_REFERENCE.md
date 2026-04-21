@@ -17,7 +17,7 @@ Check if the server is running.
 **Response Example:**
 ```json
 {
-  "name": "🎃 Pumpking Mind Library",
+  "name": "Pumpking Mind Library",
   "status": "ok",
   "timestamp": "2026-04-13T10:30:00.000000"
 }
@@ -50,7 +50,7 @@ Register a new AI instance.
 
 ### POST /api/ping
 
-Instance heartbeat �?keeps the instance marked as online.
+Instance heartbeat - keeps the instance marked as online.
 
 **Request Body:**
 ```json

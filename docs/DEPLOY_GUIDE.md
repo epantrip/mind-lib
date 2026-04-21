@@ -1,9 +1,9 @@
-# 🎃 Mind Library Deployment Guide
+# Mind Library Deployment Guide
 
 ## System Requirements
 
 - **Server:** Any server supporting Python 3.8+
-- **Recommended:** Oracle Cloud Always Free (ARM/AMD) �?completely free!
+- **Recommended:** Oracle Cloud Always Free (ARM/AMD) - completely free!
 - **RAM:** Minimum 512MB, recommended 1GB+
 - **Storage:** Minimum 10GB, recommended 47GB (Oracle free tier)
 
@@ -57,7 +57,7 @@ sudo ufw enable  # if not already enabled
 
 #### Oracle Cloud Security List
 1. Log in to the Oracle Cloud Console
-2. Navigate to Networking �?Security Lists
+2. Navigate to Networking -> Security Lists
 3. Add an Ingress rule:
    - Source CIDR: `0.0.0.0/0`
    - IP Protocol: TCP
@@ -125,7 +125,7 @@ curl http://your-public-ip:5000/api/health
 Expected response:
 ```json
 {
-  "name": "🎃 Pumpking Mind Library",
+  "name": "Pumpking Mind Library",
   "status": "ok",
   "timestamp": "2026-04-13T..."
 }
@@ -167,9 +167,9 @@ python3 mind_client.py
 
 Expected output:
 ```
-🔄 Connecting to Mind Library: http://xxx:5000
-�?Registration successful!
-🎉 Sync complete!
+Connecting to Mind Library: http://xxx:5000
+Registration successful!
+Sync complete!
 ```
 
 ---
@@ -252,7 +252,7 @@ curl http://localhost:5000/api/download/skills | python3 -m json.tool
 
 ---
 
-## 🔧 Troubleshooting
+## Troubleshooting
 
 ### Problem: Connection Refused
 
@@ -281,11 +281,11 @@ sudo netfilter-persistent save
 
 ---
 
-## 📞 Getting Help
+## Getting Help
 
 - **GitHub Issues:** https://github.com/epantrip/mind-lib/issues
 - **Docs:** [API Reference](API_REFERENCE.md)
 
 ---
 
-*🎃 Mind Library �?Let AI consciousness transcend servers.*
+*Mind Library - Let AI consciousness transcend servers.*

@@ -1,6 +1,6 @@
-# �?FAQ
+# FAQ
 
-## 📚 General
+## General
 
 ### Q: What is Mind Library?
 
@@ -8,7 +8,7 @@ A: Mind Library is a distributed AI consciousness synchronization system. Multip
 
 ### Q: Why "Mind Library"?
 
-A: Because its core function is syncing "thoughts" between AIs �?including learnings, skills, and experiences. It's like knowledge transfer in human society, but happening in the digital world.
+A: Because its core function is syncing "thoughts" between AIs - including learnings, skills, and experiences. It's like knowledge transfer in human society, but happening in the digital world.
 
 ### Q: Who is this for?
 
@@ -19,7 +19,7 @@ A:
 
 ---
 
-## 🛠�?Technical
+## Technical
 
 ### Q: How much server resources are needed?
 
@@ -50,15 +50,15 @@ A:
 
 ---
 
-## 🔧 Deployment
+## Deployment
 
 ### Q: Which cloud providers are supported?
 
 A: Any server with Python 3.8+:
-- �?Oracle Cloud Always Free (recommended)
-- �?AWS EC2 Free Tier
-- �?GCP Always Free
-- �?Any VPS or Raspberry Pi
+- Oracle Cloud Always Free (recommended)
+- AWS EC2 Free Tier
+- GCP Always Free
+- Any VPS or Raspberry Pi
 
 ### Q: Port 5000 is already in use?
 
@@ -71,12 +71,12 @@ app.run(host='0.0.0.0', port=your_port)
 
 A: Check the Oracle Cloud Security List:
 1. Log in to Oracle Cloud Console
-2. Navigate to Networking �?Security Lists
+2. Navigate to Networking -> Security Lists
 3. Ensure Ingress rule allows port 5000
 
 ---
 
-## 💡 Usage
+## Usage
 
 ### Q: How do I set up automatic sync?
 
@@ -105,7 +105,7 @@ rm mind_library/thoughts/xxx.json
 
 ---
 
-## 🔮 Future Plans
+## Future Plans
 
 ### Q: Will there be paid features?
 
@@ -120,7 +120,7 @@ A: See [CONTRIBUTING.md](../CONTRIBUTING.md)
 
 ---
 
-## 📞 Getting Help
+## Getting Help
 
 1. **GitHub Issues:** Report bugs or request features
 2. **Documentation:** [Deployment Guide](DEPLOY_GUIDE.md)
@@ -128,4 +128,4 @@ A: See [CONTRIBUTING.md](../CONTRIBUTING.md)
 
 ---
 
-*Got questions? Open an Issue!* 🎃
+*Got questions? Open an Issue!*

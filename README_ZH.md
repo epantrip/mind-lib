@@ -1,4 +1,4 @@
-﻿# 🧠 Mind Library - 分布式集体意识系统
+# 🧠 Mind Library - 分布式集体意识系统
 
 [English](README.md) | [中文](README_ZH.md)
 

@@ -1,4 +1,4 @@
-﻿"""Mind Library Distributed Secure Server - Main v2.2.0 (Thread-Safe)
+"""Mind Library Distributed Secure Server - Main v2.2.1 (Thread-Safe)
 
 Features:
 - Distributed cluster support (consistent hashing + multi-replica)
@@ -119,12 +119,12 @@ def index():
     """Web dashboard"""
     stats = store.get_stats()
     stats.update({
-        "version": "2.2.0",
+        "version": "2.2.1",
         "coordinator_status": coordinator.status.value,
         "cluster_nodes": len(coordinator.node_manager.nodes),
     })
     html = """<!DOCTYPE html>
-<html><head><meta charset="utf-8"><title>Mind Library v2.2.0</title>
+<html><head><meta charset="utf-8"><title>Mind Library v2.2.1</title>
 <style>
 body{font-family:Arial,sans-serif;max-width:800px;margin:0 auto;padding:20px;background:#f5f5f5}
 h1{color:#333}.card{background:white;border-radius:8px;padding:20px;margin:10px 0;box-shadow:0 2px 4px rgba(0,0,0,0.1)}
@@ -161,7 +161,7 @@ def health():
     """Health check"""
     return jsonify({
         "status": "ok",
-        "version": "2.2.0",
+        "version": "2.2.1",
         "distributed": True,
         "secure": True,
         "thread_safe": True,
@@ -197,7 +197,15 @@ def register():
     if not instance_id:
         return jsonify({"error": "instance_id is required"}), 400
     if store.instance_exists(instance_id):
-        return jsonify({"error": "Instance already exists"}), 409
+        # Idempotent registration: return existing token instead of 409
+        existing = store.get_instance(instance_id)
+        return jsonify({
+            "status": "exists",
+            "message": "Instance already registered, returning existing token",
+            "instance_id": instance_id,
+            "api_key": existing.get("token", "") if existing else "",
+            "approved": existing.get("approved", False) if existing else False,
+        })
     api_key = hashlib.sha256(f"{instance_id}_{time.time()}".encode()).hexdigest()[:32]
     instance = {
         "id": instance_id,
@@ -568,7 +576,7 @@ def unhandled_exception(e):
 
 if __name__ == "__main__":
     print("=" * 50)
-    print("Mind Library v2.2.0 Distributed Secure Server (Thread-Safe)")
+    print("Mind Library v2.2.1 Distributed Secure Server (Thread-Safe)")
     print("=" * 50)
     print(f"Node ID:       {Config.NODE_ID}")
     print(f"Storage path:  {Config.DB_PATH}")

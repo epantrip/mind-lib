@@ -1,4 +1,4 @@
-﻿"""
+"""
 Mind Library - Distributed Coordinator (P2: Rebalance + Repair)
 
 Incremental changes:

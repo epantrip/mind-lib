@@ -1,9 +1,23 @@
-﻿# Changelog
+# Changelog
 
 All notable changes to this project will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
+
+## [2.2.1] - 2026-04-21
+
+### Fixed
+- **Idempotent registration** — /api/register now returns existing instance token (approved status) instead of 409 Conflict when an instance is already registered; clients that restart and re-register no longer fail
+- **Encoding corruption** — Fixed UTF-8 replacement character corruption in docs/API_REFERENCE.md, docs/DEPLOY_GUIDE.md, docs/FAQ.md, docs-zh/FAQ.md, docs-zh/basic_usage.py, server/mind_server.py
+- **BOM removal** — Removed unnecessary UTF-8 BOM from CHANGELOG.md, README_ZH.md, server/mind_server_v2.1.py, server/start.sh, server/distributed/config.py, server/distributed/coordinator.py
+- **Remote server version** — Oracle Cloud server confirmed running v2.2.1 with all patches applied
+
+### Changed
+- All source files normalized to UTF-8 without BOM, CRLF line endings on Windows
+- Version bumped: pyproject.toml, mind_server_v2.1.py (health response + web dashboard)
+
+---
 
 ## [2.2.0] - 2026-04-19
 

@@ -17,7 +17,7 @@ client = MindSyncClient(SERVER, INSTANCE_ID, INSTANCE_NAME)
 
 # Register
 if client.register():
-    print("�?Registration successful")
+    print("✅ Registration successful")
 else:
     print("⚠️ Registration failed (may already exist)")
 

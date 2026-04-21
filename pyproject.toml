@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "mind-lib"
-version = "2.2.0"
+version = "2.2.1"
 description = "Distributed AI Collective Consciousness Sync System - Enable AI to share thoughts and skills across servers, with thread-safe storage, HMAC node authentication, and production-ready deployment"
 readme = "README.md"
 license = {text = "MIT"}
