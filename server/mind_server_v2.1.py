@@ -119,7 +119,7 @@ def index():
     """Web dashboard"""
     stats = store.get_stats()
     stats.update({
-        "version": "2.2.2",
+        "version": "2.2.3",
         "coordinator_status": coordinator.status.value,
         "cluster_nodes": len(coordinator.node_manager.nodes),
     })
@@ -161,7 +161,7 @@ def health():
     """Health check"""
     return jsonify({
         "status": "ok",
-        "version": "2.2.2",
+        "version": "2.2.3",
         "distributed": True,
         "secure": True,
         "thread_safe": True,

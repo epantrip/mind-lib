@@ -95,7 +95,7 @@ def test_health(tracker: ResultTracker):
     resp = requests.get(f"{SERVER_URL}/api/health", timeout=5)
     tracker.record(
         "T1 健康检查",
-        resp.status_code == 200 and resp.json().get("version") == "2.2.0",
+        resp.status_code == 200 and resp.json().get("version") == "2.2.3",
         detail=f"status={resp.status_code}, version={resp.json().get('version')}",
     )
 

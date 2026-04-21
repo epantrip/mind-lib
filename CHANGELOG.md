@@ -5,7 +5,7 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [2.2.2] - 2026-04-21
+## [2.2.3] - 2026-04-21
 
 ### Fixed
 - **mind_client.py: API key authentication** — client now sends X-API-Key + X-Instance-ID headers on download/upload requests; fixes perpetual 401 errors for pumpking_main and other instances
