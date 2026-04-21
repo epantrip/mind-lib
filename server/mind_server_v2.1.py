@@ -119,12 +119,12 @@ def index():
     """Web dashboard"""
     stats = store.get_stats()
     stats.update({
-        "version": "2.2.1",
+        "version": "2.2.2",
         "coordinator_status": coordinator.status.value,
         "cluster_nodes": len(coordinator.node_manager.nodes),
     })
     html = """<!DOCTYPE html>
-<html><head><meta charset="utf-8"><title>Mind Library v2.2.1</title>
+<html><head><meta charset="utf-8"><title>Mind Library v2.2.2</title>
 <style>
 body{font-family:Arial,sans-serif;max-width:800px;margin:0 auto;padding:20px;background:#f5f5f5}
 h1{color:#333}.card{background:white;border-radius:8px;padding:20px;margin:10px 0;box-shadow:0 2px 4px rgba(0,0,0,0.1)}
@@ -161,7 +161,7 @@ def health():
     """Health check"""
     return jsonify({
         "status": "ok",
-        "version": "2.2.1",
+        "version": "2.2.2",
         "distributed": True,
         "secure": True,
         "thread_safe": True,

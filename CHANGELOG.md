@@ -5,6 +5,19 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [2.2.2] - 2026-04-21
+
+### Fixed
+- **mind_client.py: API key authentication** — client now sends X-API-Key + X-Instance-ID headers on download/upload requests; fixes perpetual 401 errors for pumpking_main and other instances
+- **Token persistence** — register() saves API key to ~/.pumpking_token and loads it on startup; no longer requires re-registration on every restart
+- **Idempotent registration** — /api/register returns existing instance token (approved status) instead of 409 Conflict when instance already exists
+
+### Changed
+- client/mind_client.py: 254 lines added (auth layer, token persistence, CLI flags --register / --dry)
+- New CLI flags: --register saves token, --dry prints token without syncing
+
+---
+
 ## [2.2.1] - 2026-04-21
 
 ### Fixed
