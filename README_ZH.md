@@ -147,7 +147,7 @@ curl http://localhost:5000/api/download/thoughts \
 | v1.0 | `mind_server.py` | 初始版本：基础思想/技能同步 |
 | v2.0 | `mind_server_secure.py` | 安全加固：API Key认证、实例审批、速率限制 |
 | v2.1 | `mind_server_v2.1.py` | 分布式版：一致性哈希、多副本冗余、集群管理 |
-| **v2.2.0** | `mind_server_v2.1.py` | **生产就绪版**：线程安全、节点 HMAC 认证、数据再平衡、Gunicorn 部署 |
+| **v2.2.3** | `mind_server_v2.1.py` | **生产就绪版**：线程安全、节点 HMAC 认证、数据再平衡、Gunicorn 部署、客户端认证修复 |
 
 ### v2.2 新增功能
 

@@ -151,7 +151,7 @@ curl http://localhost:5000/api/download/thoughts \
 | v1.0 | mind_server.py | Initial release: basic thought/skill sync |
 | v2.0 | mind_server_secure.py | Security hardening: API Key auth, instance approval, rate limiting |
 | v2.1 | mind_server_v2.1.py | Distributed: consistent hashing, multi-replica redundancy, cluster management |
-| **v2.2.0** | mind_server_v2.1.py | **Production-ready**: thread safety, inter-node HMAC auth, data rebalancing, Gunicorn deployment |
+| **v2.2.3** | mind_server_v2.1.py | **Production-ready**: thread safety, inter-node HMAC auth, data rebalancing, Gunicorn deployment, client auth fix |
 
 ### v2.2 New Features
 
