@@ -124,7 +124,7 @@ def index():
         "cluster_nodes": len(coordinator.node_manager.nodes),
     })
     html = """<!DOCTYPE html>
-<html><head><meta charset="utf-8"><title>Mind Library v2.2.2</title>
+<html><head><meta charset="utf-8"><title>Mind Library v2.2.3</title>
 <style>
 body{font-family:Arial,sans-serif;max-width:800px;margin:0 auto;padding:20px;background:#f5f5f5}
 h1{color:#333}.card{background:white;border-radius:8px;padding:20px;margin:10px 0;box-shadow:0 2px 4px rgba(0,0,0,0.1)}
@@ -132,7 +132,7 @@ h1{color:#333}.card{background:white;border-radius:8px;padding:20px;margin:10px 
 .status{color:#2196F3;font-weight:bold}.status-standby{color:#FF9800}
 </style></head>
 <body>
-<h1>Mind Library v2.2.0</h1>
+<h1>Mind Library v2.2.3</h1>
 <div class="card">
 <h2>System Status</h2>
 <p><span class="label">Version:</span> <span class="stat">{{stats.version}}</span></p>
@@ -576,7 +576,7 @@ def unhandled_exception(e):
 
 if __name__ == "__main__":
     print("=" * 50)
-    print("Mind Library v2.2.1 Distributed Secure Server (Thread-Safe)")
+    print("Mind Library v2.2.3 Distributed Secure Server (Thread-Safe)")
     print("=" * 50)
     print(f"Node ID:       {Config.NODE_ID}")
     print(f"Storage path:  {Config.DB_PATH}")

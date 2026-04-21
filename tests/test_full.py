@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-Mind Library v2.2.0 全面集成测试
+Mind Library v2.2.3 全面集成测试
 
 覆盖完整业务流程：
   1. 注册 → 2. 上传(未审批403) → 3. 审批 → 4. 上传/下载 → 5. ping

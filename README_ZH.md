@@ -5,7 +5,7 @@
 <p align="center">
   <img src="https://img.shields.io/badge/Python-3.8+-blue.svg" alt="Python">
   <img src="https://img.shields.io/badge/License-MIT-green.svg" alt="License">
-  <img src="https://img.shields.io/badge/Version-2.2-orange.svg" alt="Version">
+  <img src="https://img.shields.io/badge/Version-2.2.3-orange.svg" alt="Version">
   <img src="https://img.shields.io/badge/Security-Authorization-red.svg" alt="Security">
 </p>
 
@@ -147,7 +147,7 @@ curl http://localhost:5000/api/download/thoughts \
 | v1.0 | `mind_server.py` | 初始版本：基础思想/技能同步 |
 | v2.0 | `mind_server_secure.py` | 安全加固：API Key认证、实例审批、速率限制 |
 | v2.1 | `mind_server_v2.1.py` | 分布式版：一致性哈希、多副本冗余、集群管理 |
-| **v2.2** | `mind_server_v2.1.py` | **生产就绪版**：线程安全、节点 HMAC 认证、数据再平衡、Gunicorn 部署 |
+| **v2.2.0** | `mind_server_v2.1.py` | **生产就绪版**：线程安全、节点 HMAC 认证、数据再平衡、Gunicorn 部署 |
 
 ### v2.2 新增功能
 
@@ -348,6 +348,8 @@ mind-lib/
 
 | 版本 | 日期 | 变更 |
 |------|------|------|
+| **v2.2.3** | 2026-04-21 | 🐛 **客户端认证修复**：mind_client.py 现在发送 X-API-Key + X-Instance-ID 请求头；幂等注册遇重复返回已有 token；token 持久化到磁盘 |
+| **v2.2.1** | 2026-04-21 | 🛡️ 编码修复：UTF-8 损坏修复 + 文档/源码 BOM 移除 |
 | **v2.2.0** | 2026-04-19 | 🛡️ **生产就绪**：线程安全 DataStore (P0)、节点 HMAC 签名认证 (P1)、数据再平衡/副本修复 (P2)、Config 生产配置、Gunicorn 部署、CORS+请求追踪、全局异常兜底 |
 | v2.1.0 | 2026-04-17 | 🌐 分布式集群：一致性哈希、多副本冗余、节点管理、路由缓存持久化、模块化重构 |
 | v2.0.1 | 2026-04-15 | 📡 Webhook 通知、新实例注册通知 |

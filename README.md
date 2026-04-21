@@ -5,7 +5,7 @@
 <p align="center">
   <img src="https://img.shields.io/badge/Python-3.8+-blue.svg" alt="Python">
   <img src="https://img.shields.io/badge/License-MIT-green.svg" alt="License">
-  <img src="https://img.shields.io/badge/Version-2.2-orange.svg" alt="Version">
+  <img src="https://img.shields.io/badge/Version-2.2.3-orange.svg" alt="Version">
   <img src="https://img.shields.io/badge/Security-Authorization-red.svg" alt="Security">
 </p>
 
@@ -151,7 +151,7 @@ curl http://localhost:5000/api/download/thoughts \
 | v1.0 | mind_server.py | Initial release: basic thought/skill sync |
 | v2.0 | mind_server_secure.py | Security hardening: API Key auth, instance approval, rate limiting |
 | v2.1 | mind_server_v2.1.py | Distributed: consistent hashing, multi-replica redundancy, cluster management |
-| **v2.2** | mind_server_v2.1.py | **Production-ready**: thread safety, inter-node HMAC auth, data rebalancing, Gunicorn deployment |
+| **v2.2.0** | mind_server_v2.1.py | **Production-ready**: thread safety, inter-node HMAC auth, data rebalancing, Gunicorn deployment |
 
 ### v2.2 New Features
 
@@ -356,6 +356,8 @@ mind-lib/
 
 | Version | Date | Changes |
 |---------|------|---------|
+| **v2.2.3** | 2026-04-21 | 🐛 **Client auth fix**: mind_client.py now sends X-API-Key + X-Instance-ID headers; idempotent registration returns existing token on duplicate; token persistence on disk |
+| **v2.2.1** | 2026-04-21 | 🛡️ Encoding fixes: UTF-8 corruption + BOM removal across docs and source files |
 | **v2.2.0** | 2026-04-19 | 🛡️ **Production-ready**: Thread-safe DataStore (P0), inter-node HMAC signature auth (P1), data rebalancing/replica repair (P2), Config production setup, Gunicorn deployment, CORS+request tracing, global exception handling |
 | v2.1.0 | 2026-04-17 | 🌐 Distributed cluster: consistent hashing, multi-replica redundancy, node management, routing cache persistence, modular refactoring |
 | v2.1.1 | 2026-04-17 | 🌐 Web UI admin panel (embedded HTML, accessible at root URL) |
